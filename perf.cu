@@ -1,16 +1,9 @@
-//
-// Created by thesh on 14/12/2020.
-//
 #include "perf.h"
+#include "matrix.h"
 #include <cstdio>
 
 __constant__ float building_blocks[2*43];
 __constant__ unsigned char combinations[23*3*3];
-
-template<int D>
-__global__ void hello_world_kernel() {
-    printf("%d: %d", D, threadIdx.x);
-}
 
 template<int D>
 __device__ float evaluate(unsigned char *combination, float *coefs, float *ctps, float *params) {
@@ -27,7 +20,7 @@ __device__ float evaluate(unsigned char *combination, float *coefs, float *ctps,
 }
 
 template<int D>
-__global__ void find_best_hypothesis(float *measurements, int num_combinations, int num_buildingblocks) {
+__global__ void find_best_hypothesis(GPUMatrix measurements, int num_combinations, int num_buildingblocks) {
     // measurements should probably be a matrix
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     float ctps[2*D];
@@ -62,8 +55,4 @@ __global__ void find_best_hypothesis(float *measurements, int num_combinations, 
 
 
     // write block result
-}
-
-void hello_world() {
-    hello_world_kernel<3><<<1, 1>>>();
 }
