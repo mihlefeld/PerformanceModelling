@@ -24,7 +24,9 @@ find_package(CUDA REQUIRED)
 # Turing
 #set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -gencode arch=compute_75,code=sm_75")
 
-cuda_add_executable(PerformanceModelling main.cpp perf.cu)
+cuda_add_executable(PerformanceModelling
+		main.cpp
+		perf.cu)
 
 # Activate (and require) C++11 support
 set_property(TARGET PerformanceModelling PROPERTY CXX_STANDARD 11)

@@ -1,6 +1,7 @@
 #include <iostream>
+#include "perf.h"
 
 int main() {
-    std::cout << "Hello, World!" << std::endl;
+    hello_world();
     return 0;
 }

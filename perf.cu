@@ -1,8 +1,16 @@
 //
 // Created by thesh on 14/12/2020.
 //
+#include "perf.h"
+#include <cstdio>
+
 __constant__ float building_blocks[2*43];
 __constant__ unsigned char combinations[23*3*3];
+
+template<int D>
+__global__ void hello_world_kernel() {
+    printf("%d: %d", D, threadIdx.x);
+}
 
 template<int D>
 __device__ float evaluate(unsigned char *combination, float *coefs, float *ctps, float *params) {
@@ -54,4 +62,8 @@ __global__ void find_best_hypothesis(float *measurements, int num_combinations, 
 
 
     // write block result
+}
+
+void hello_world() {
+    hello_world_kernel<3><<<1, 1>>>();
 }
