@@ -6,6 +6,8 @@
 #define PERFORMANCEMODELLING_MATRIX_H
 
 #include <cstdlib>
+#include <string>
+#include <utility>
 
 struct CPUMatrix {
     int width;
