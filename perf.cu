@@ -205,6 +205,20 @@ unsigned char combinations_5d[] {
     0, 0, 0, 0, 1
 };
 
+__device__ float* get_matrix_element_ptr(GPUMatrix m, int x, int y) {
+    return (float*)((char*)m.elements + y * m.pitch) + x;
+}
+
+__device__ float get_matrix_element(GPUMatrix m, int x, int y) {
+    float* pElement = (float*)((char*)m.elements + y * m.pitch) + x;
+    return *pElement;
+}
+
+__device__ void set_matrix_element(GPUMatrix m, int x, int y, float v) {
+    float* pElement = (float*)((char*)m.elements + y * m.pitch) + x;
+    *pElement = v;
+}
+
 template<int D>
 __device__ float evaluate_single(unsigned char *combination, float coef, float *ctps, float *params) {
     float prod = coef;
@@ -214,21 +228,23 @@ __device__ float evaluate_single(unsigned char *combination, float coef, float *
     return prod;
 }
 
+// coefs has to be initialized with all 1s
+// coefs needs to be D + 1 in size
 template<int D>
 __device__ float evaluate_multi(unsigned char *combination, float *coefs, float *ctps, float *params) {
-    float result = 0;
+    float result = coefs[0];
     for (int i = 0; i < D; i++) {
-        result += evaluate_single<D>(&combination[i*D], coefs[i], ctps, params);;
+        result += evaluate_single<D>(&combination[i*D], coefs[i + 1], ctps, params);;
     }
     return result;
 }
 
 template<int D>
-__global__ void find_best_hypothesis(GPUMatrix measurements, int num_combinations, int num_buildingblocks) {
+__global__ void prepare_lstsq(GPUMatrix measurements, int num_combinations, int num_buildingblocks) {
     // measurements should probably be a matrix
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     float ctps[2*D];
-    float coefs[D];
+    float coefs[D + 1];
     unsigned char combination[D*D];
     /*
      * a*b*c + a*b + c
@@ -255,14 +271,10 @@ __global__ void find_best_hypothesis(GPUMatrix measurements, int num_combination
         r/= num_buildingblocks;
     }
 
-    // compute coefficients
-
-
-    // cross validation
-
-
-    // parallel reduction
-
-
-    // write block result
+    for (int i = 0; i < measurements.height; i++) {
+        for (int j = 0; j < D; j++) {
+            // this value needs to be written into a giant list of matrices
+            float y = evaluate_single<D>(&combination[D*j], 1, ctps, get_matrix_element_ptr(measurements, 0, i));
+        }
+    }
 }
