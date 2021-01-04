@@ -33,4 +33,6 @@ void matrix_download(const GPUMatrix &src, CPUMatrix &dst);
 
 void matrix_print(const CPUMatrix &m);
 
+std::pair<CPUMatrix, CPUMatrix> load_from_file(const std::string& filename);
+
 #endif //PERFORMANCEMODELLING_MATRIX_H
