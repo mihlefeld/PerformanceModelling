@@ -90,6 +90,8 @@ std::pair<CPUMatrix, CPUMatrix> load_from_file(const std::string& filename) {
     int dimensions, count;
     file >> dimensions >> count;
 
+    std::cout << dimensions << " dimensions and " << count << " rows" << std::endl;
+
     CPUMatrix coordinates = matrix_alloc_cpu(dimensions, count);
     CPUMatrix measurements = matrix_alloc_cpu(1, count);
 
@@ -97,7 +99,7 @@ std::pair<CPUMatrix, CPUMatrix> load_from_file(const std::string& filename) {
         float num;
         for(int i = 0; i < dimensions; i++) {
             file >> num;
-            coordinates.elements[row*dimensions * i] = num;
+            coordinates.elements[row*dimensions + i] = num;
         }
 
         file >> num;
