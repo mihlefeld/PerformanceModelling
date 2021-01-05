@@ -72,10 +72,12 @@ void matrix_print(const CPUMatrix &m) {
 }
 
 std::pair<CPUMatrix, CPUMatrix> load_from_file(const std::string& filename) {
+    std::cout << "Openging file '" << filename << "'." << std::endl;
+
     std::ifstream file;
     file.open(filename);
     if(!file.is_open()) {
-        std::cerr << "Error: could not load file '" << filename << "'" << std::endl;
+        std::cerr << "Error: could not load file '" << filename << "'!" << std::endl;
         std::exit(EXIT_FAILURE);
     }
 
@@ -83,19 +85,19 @@ std::pair<CPUMatrix, CPUMatrix> load_from_file(const std::string& filename) {
     file >> extrapStr >> measurementsStr;
 
     if(extrapStr != "extrap" || measurementsStr != "measurements") {
-        std::cerr << "Error: file '" << filename << "' is not an extrap measurements file" << std::endl;
+        std::cerr << "Error: file '" << filename << "' is not an extrap measurements file!" << std::endl;
         std::exit(EXIT_FAILURE);
     }
 
-    int dimensions, count;
-    file >> dimensions >> count;
+    int dimensions, rows;
+    file >> dimensions >> rows;
 
-    std::cout << dimensions << " dimensions and " << count << " rows" << std::endl;
+    std::cout << rows << " measurements with " << dimensions << " dimensions found." << std::endl;
 
-    CPUMatrix coordinates = matrix_alloc_cpu(dimensions, count);
-    CPUMatrix measurements = matrix_alloc_cpu(1, count);
+    CPUMatrix coordinates = matrix_alloc_cpu(dimensions, rows);
+    CPUMatrix measurements = matrix_alloc_cpu(1, rows);
 
-    for(int row = 0; row < count; row++) {
+    for(int row = 0; row < rows; row++) {
         float num;
         for(int i = 0; i < dimensions; i++) {
             file >> num;
@@ -105,6 +107,10 @@ std::pair<CPUMatrix, CPUMatrix> load_from_file(const std::string& filename) {
         file >> num;
         measurements.elements[row] = num;
     }
+
+    file.close();
+
+    std::cout << "Measurements successfully loaded." << std::endl;
 
     return std::make_pair(coordinates, measurements);
 }
