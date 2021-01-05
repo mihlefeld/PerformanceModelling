@@ -1,6 +1,7 @@
 #include <iostream>
 #include <iomanip>
 #include <cstdlib>
+#include <fstream>
 
 #include <cuda_runtime.h>
 
@@ -68,4 +69,48 @@ void matrix_print(const CPUMatrix &m) {
         }
         std::cout << std::endl;
     }
+}
+
+std::pair<CPUMatrix, CPUMatrix> load_from_file(const std::string& filename) {
+    std::cout << "Openging file '" << filename << "'." << std::endl;
+
+    std::ifstream file;
+    file.open(filename);
+    if(!file.is_open()) {
+        std::cerr << "Error: could not load file '" << filename << "'!" << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+
+    std::string extrapStr, measurementsStr;
+    file >> extrapStr >> measurementsStr;
+
+    if(extrapStr != "extrap" || measurementsStr != "measurements") {
+        std::cerr << "Error: file '" << filename << "' is not an extrap measurements file!" << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+
+    int dimensions, rows;
+    file >> dimensions >> rows;
+
+    std::cout << rows << " measurements with " << dimensions << " dimensions found." << std::endl;
+
+    CPUMatrix coordinates = matrix_alloc_cpu(dimensions, rows);
+    CPUMatrix measurements = matrix_alloc_cpu(1, rows);
+
+    for(int row = 0; row < rows; row++) {
+        float num;
+        for(int i = 0; i < dimensions; i++) {
+            file >> num;
+            coordinates.elements[row*dimensions + i] = num;
+        }
+
+        file >> num;
+        measurements.elements[row] = num;
+    }
+
+    file.close();
+
+    std::cout << "Measurements successfully loaded." << std::endl;
+
+    return std::make_pair(coordinates, measurements);
 }

@@ -26,13 +26,14 @@ def main():
         measurements = experiment.measurements[(experiment.callpaths[i], experiment.metrics[i])]
 
         dimensions = len(measurements[0].coordinate)
-        print("extrap measurements", dimensions)
+        count = len(measurements)
+        print("extrap measurements", dimensions, count)
 
 
         for measurement in measurements:
             for x in measurement.coordinate:
                 print(x, end=" ")
-            print(measurement.mean, measurement.median, measurement.minimum, measurement.maximum, measurement.std)
+            print(measurement.mean) #, measurement.median, measurement.minimum, measurement.maximum, measurement.std)
 
     #modeller = DirectMultiParameterModeler()
     #model = modeller.create_model(experiment.measurements[(Callpath('reg'), Metric('metr'))])
