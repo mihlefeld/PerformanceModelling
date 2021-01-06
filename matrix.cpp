@@ -71,7 +71,7 @@ void matrix_print(const CPUMatrix &m) {
     }
 }
 
-std::pair<CPUMatrix, CPUMatrix> load_from_file(const std::string& filename) {
+CPUMatrix load_from_file(const std::string& filename) {
     std::cout << "Openging file '" << filename << "'." << std::endl;
 
     std::ifstream file;
@@ -94,23 +94,19 @@ std::pair<CPUMatrix, CPUMatrix> load_from_file(const std::string& filename) {
 
     std::cout << rows << " measurements with " << dimensions << " dimensions found." << std::endl;
 
-    CPUMatrix coordinates = matrix_alloc_cpu(dimensions, rows);
-    CPUMatrix measurements = matrix_alloc_cpu(1, rows);
+    CPUMatrix measurements = matrix_alloc_cpu(dimensions+1, rows);
 
     for(int row = 0; row < rows; row++) {
         float num;
-        for(int i = 0; i < dimensions; i++) {
+        for(int i = 0; i < dimensions+1; i++) {
             file >> num;
-            coordinates.elements[row*dimensions + i] = num;
+            measurements.elements[row*dimensions + i] = num;
         }
-
-        file >> num;
-        measurements.elements[row] = num;
     }
 
     file.close();
 
     std::cout << "Measurements successfully loaded." << std::endl;
 
-    return std::make_pair(coordinates, measurements);
+    return measurements;
 }
