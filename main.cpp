@@ -1,6 +1,5 @@
 #include <iostream>
 #include "perf.h"
-#include "matrix.h"
 
 int main(int argc, char** argv) {
     if (argc != 2) {

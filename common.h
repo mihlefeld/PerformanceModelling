@@ -1,14 +1,7 @@
-//
-// Created by thesh on 03/01/2021.
-//
-
-#ifndef PERFORMANCEMODELLING_COMMON_H
-#define PERFORMANCEMODELLING_COMMON_H
+#pragma once
 
 #include <iostream>
-
 #include <cuda_runtime.h>
-
 #include "matrix.h"
 
 #define CUDA_CHECK_ERROR                                                       \
@@ -22,6 +15,16 @@
         }                                                                      \
     } while(0)
 
+#define CUBLAS_CALL(call)                                               \
+{                                                                       \
+    cublasStatus_t stat = call;                                         \
+    if (stat != CUBLAS_STATUS_SUCCESS) {                                \
+        std::cout << "Cublas error in " << __FILE__ << ": " << __LINE__ \
+        << " (" << stat << ")" << std::endl;                            \
+        exit(EXIT_FAILURE);                                             \
+    }                                                                   \
+}
+
 
 inline unsigned int div_up(unsigned int numerator, unsigned int denominator)
 {
@@ -29,6 +32,3 @@ inline unsigned int div_up(unsigned int numerator, unsigned int denominator)
     if (numerator % denominator) ++result;
     return result;
 }
-
-
-#endif //PERFORMANCEMODELLING_COMMON_H

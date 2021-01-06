@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.1)
 
 project(PerformanceModelling)
 
+
+link_directories(/usr/local/cuda-11.1/lib64)
+
 # Set the default build type
 if(NOT CMAKE_BUILD_TYPE)
 	set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel." FORCE)
@@ -31,5 +34,7 @@ cuda_add_executable(PerformanceModelling
 # Activate (and require) C++11 support
 set_property(TARGET PerformanceModelling PROPERTY CXX_STANDARD 17)
 set_property(TARGET PerformanceModelling PROPERTY CXX_STANDARD_REQUIRED ON)
+
+target_link_libraries(PerformanceModelling -lcublas -lcurand)
 
 install(TARGETS PerformanceModelling RUNTIME DESTINATION bin)

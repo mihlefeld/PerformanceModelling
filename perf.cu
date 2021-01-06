@@ -1,9 +1,10 @@
+#define DEBUG
 #include <cuda_runtime.h>
 #include <cstdio>
 #include <iostream>
 
+#include "cublas_v2.h"
 #include "perf.h"
-#include "matrix.h"
 #include "common.h"
 
 __constant__ float building_blocks[] = {
@@ -227,7 +228,8 @@ template<int D>
 __device__ float evaluate_single(unsigned char *combination, float coef, float *ctps, float *params) {
     float prod = coef;
     for (int i = 0; i < D; i++) {
-        prod *= combination[i] * pow(params[i], ctps[i*2]) * pow(log2(params[i]), ctps[i*2 + 1]);
+        if (combination[i])
+            prod *= pow(params[i], ctps[i*2]) * pow(log2(params[i]), ctps[i*2 + 1]);
     }
     return prod;
 }
@@ -246,29 +248,11 @@ __device__ float evaluate_multi(unsigned char *combination, float *coefs, float 
 template<int D>
 __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
                                      float *amatrices, float *cmatrices, float **amptrs, float **cmptrs) {
-
-    if constexpr(D == 2) {
-        num_combinations = 4;
-    } else if constexpr(D == 3) {
-        num_combinations = 23;
-    } else {
-        num_combinations = 2;
-    }
-
     // measurements should probably be a matrix
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     if(idx >= num_hypothesis)
         return;
 
-    if(idx == 0) {
-        printf("HELLO THERE\n");
-    }
-
-    if(idx == 1200000) {
-        printf("HELLO THERE ME WERE NICE\n");
-    }
-
-    // TODO exit if index out of range
     float *amatrix = &amatrices[idx * (measurements.height * (D + 1))];
     float *cmatrix = &cmatrices[idx * measurements.height];
     amptrs[idx] = amatrix;
@@ -283,7 +267,7 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
      */
 
     int combination_index = idx / num_combinations;
-    idx = combination_index % num_combinations;
+    int mod_idx = combination_index % num_combinations;
     for (int i = 0; i < D; i++) {
         for (int j = 0; j < D; j++) {
             combination[i*D + j] = combinations[combination_index * D * D + i * D + j];
@@ -292,13 +276,40 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
 
     int r = pow(num_buildingblocks, D-1);
     for (int i = D - 1; i >= 0; i--) {
-        int ctpi = idx / r;
-        idx = ctpi % r;
+        int ctpi = mod_idx / r;
+        mod_idx = ctpi % r;
         for (int j = 0; j < 2; j++) {
             ctps[i * 2 + j] = building_blocks[ctpi * 2 + j];
         }
         r/= num_buildingblocks;
     }
+
+#ifdef DEBUG
+    if (idx == 0) {
+        float *ptr = get_matrix_element_ptr(measurements, 0, 0);
+        for (int i = 0; i < D; i++) {
+            printf("%f, ", ptr[i]);
+        }
+        printf("\nctps: ");
+        for (int i = 0; i < D; i++) {
+            printf("(%f, %f), ", ctps[i*2], ctps[i*2 + 1]);
+        }
+        printf("\nevalr: ");
+        for (int j = 0; j < D; j++) {
+            // this value needs to be written into a giant list of matrices
+            float y = evaluate_single<D>(&combination[D * j], 1, ctps, get_matrix_element_ptr(measurements, 0, 0));
+            printf("%f, ", y);
+        }
+        printf("\ncomb:\n");
+        for (int i = 0; i < D; i++) {
+            unsigned char *comptr = &combination[D * i];
+            for (int j = 0; j < D; j++) {
+                printf("%d, ", comptr[j]);
+            }
+            printf("\n");
+        }
+    }
+#endif
 
     for (int i = 0; i < measurements.height; i++) {
         // first element in every row should be 1, since there's always a constant component
@@ -314,17 +325,24 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
 }
 
 void find_hypothesis(const CPUMatrix &measurements) {
+    cudaSetDevice(5);
+
+    cublasHandle_t handle;
+
     GPUMatrix device_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
     matrix_upload(measurements, device_measurements);
 
 
+    CPUMatrix A, X, C;
     int num_combinations = 333;
     int num_buildingblocks = 39;
     int num_hypothesis = -1;
     float *amatrices, *cmatrices, **amptrs, **cmptrs;
-
-
     int dimensions = measurements.width-1;
+    auto *yvec = new float[measurements.height];
+    auto *amat = new float[(dimensions + 1) * measurements.height];
+    auto *coefs = new float[dimensions + 1];
+    int info;
     switch(dimensions) {
         case 2:
 
@@ -333,6 +351,8 @@ void find_hypothesis(const CPUMatrix &measurements) {
             num_combinations = 23;
             // TODO num_buildingblocks anpassen
             num_hypothesis = pow(num_buildingblocks, dimensions) * num_combinations;
+
+            cudaMemcpyToSymbol(combinations, combinations_3d, num_combinations, cudaMemcpyHostToDevice);
 
             cudaMalloc(&amatrices, num_hypothesis * measurements.height * (dimensions+1) * sizeof(float));
             CUDA_CHECK_ERROR;
@@ -343,9 +363,44 @@ void find_hypothesis(const CPUMatrix &measurements) {
             cudaMalloc(&cmptrs, num_hypothesis * sizeof(float*));
             CUDA_CHECK_ERROR;
 
-            prepare_gels_batched<3><<<div_up(num_hypothesis, 1024), 1024>>>(device_measurements, num_combinations, num_buildingblocks, num_hypothesis, amatrices, cmatrices, amptrs, cmptrs);
+            prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(device_measurements, num_combinations, num_buildingblocks, num_hypothesis, amatrices, cmatrices, amptrs, cmptrs);
             cudaDeviceSynchronize();
             CUDA_CHECK_ERROR;
+
+            cudaMemcpy(yvec, cmatrices, measurements.height * sizeof(float), cudaMemcpyDeviceToHost);
+            cudaMemcpy(amat, amatrices, measurements.height * (dimensions + 1) * sizeof(float), cudaMemcpyDeviceToHost);
+
+            CUBLAS_CALL(cublasCreate(&handle));
+            CUBLAS_CALL(cublasSgelsBatched(
+                    handle,
+                    CUBLAS_OP_N,
+                    measurements.height, // height of Aarray
+                    dimensions + 1, // width of Aarray and height of Carray
+                    1, // width of Carray
+                    amptrs, // Aarray pointer
+                    measurements.height, // lda >= max(1,m)
+                    cmptrs, // Carray pointer
+                    measurements.height, // ldc >= max(1,m)
+                    &info,
+                    nullptr,
+                    num_hypothesis
+                )
+            )
+
+            cudaMemcpy(coefs, cmatrices, (dimensions + 1) * sizeof(float), cudaMemcpyDeviceToHost);
+
+            X.width = 1; X.height = dimensions + 1; X.elements = coefs;
+            C.width = 1; C.height = measurements.height; C.elements = yvec;
+            A.width = measurements.height; A.height = dimensions + 1; A.elements = amat;
+            printf("A:\n");
+            matrix_print(A);
+            printf("X:\n");
+            matrix_print(X);
+            printf("C:\n");
+            matrix_print(C);
+            printf("Done");
+
+
 
             break;
         case 4:

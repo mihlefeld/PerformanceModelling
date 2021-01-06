@@ -1,10 +1,4 @@
-//
-// Created by thesh on 03/01/2021.
-//
-
-#ifndef PERFORMANCEMODELLING_MATRIX_H
-#define PERFORMANCEMODELLING_MATRIX_H
-
+#pragma once
 #include <cstdlib>
 #include <string>
 
@@ -35,5 +29,3 @@ void matrix_download(const GPUMatrix &src, CPUMatrix &dst);
 void matrix_print(const CPUMatrix &m);
 
 CPUMatrix load_from_file(const std::string& filename);
-
-#endif //PERFORMANCEMODELLING_MATRIX_H

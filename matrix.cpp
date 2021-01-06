@@ -1,12 +1,10 @@
 #include <iostream>
-#include <iomanip>
 #include <cstdlib>
 #include <fstream>
 
 #include <cuda_runtime.h>
 
 #include "common.h"
-#include "matrix.h"
 
 CPUMatrix matrix_alloc_cpu(int width, int height)
 {
@@ -100,7 +98,7 @@ CPUMatrix load_from_file(const std::string& filename) {
         float num;
         for(int i = 0; i < dimensions+1; i++) {
             file >> num;
-            measurements.elements[row*dimensions + i] = num;
+            measurements.elements[row*(dimensions + 1) + i] = num;
         }
     }
 
