@@ -240,11 +240,15 @@ __device__ float evaluate_multi(unsigned char *combination, float *coefs, float 
 }
 
 template<int D>
-__global__ void prepare_lstsq(GPUMatrix measurements, int num_combinations, int num_buildingblocks) {
+__global__ void prepare_gels_batched(GPUMatrix measurements, int num_combinations, int num_buildingblocks,
+                                     float *amatrices, float *cmatrices, float **amptrs, float **cmptrs) {
     // measurements should probably be a matrix
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
+    float *amatrix = &amatrices[idx * (measurements.height * (D + 1))];
+    float *cmatrix = &cmatrices[idx * measurements.height];
+    amptrs[idx] = amatrix;
+    cmptrs[idx] = cmatrix;
     float ctps[2*D];
-    float coefs[D + 1];
     unsigned char combination[D*D];
     /*
      * a*b*c + a*b + c
@@ -272,9 +276,14 @@ __global__ void prepare_lstsq(GPUMatrix measurements, int num_combinations, int 
     }
 
     for (int i = 0; i < measurements.height; i++) {
+        // first element in every row should be 1, since there's always a constant component
+        amatrix[i] = 1;
         for (int j = 0; j < D; j++) {
             // this value needs to be written into a giant list of matrices
             float y = evaluate_single<D>(&combination[D*j], 1, ctps, get_matrix_element_ptr(measurements, 0, i));
+            // danger danger, amatrix must be column major format
+            amatrix[j * measurements.height + i + 1] = y;
         }
+        cmatrix[i] = get_matrix_element(measurements, D, i);
     }
 }

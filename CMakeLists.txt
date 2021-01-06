@@ -26,7 +26,8 @@ find_package(CUDA REQUIRED)
 
 cuda_add_executable(PerformanceModelling
 		main.cpp
-		perf.cu matrix.h matrix.cpp common.h)
+		perf.cu
+)
 
 # Activate (and require) C++11 support
 set_property(TARGET PerformanceModelling PROPERTY CXX_STANDARD 11)
