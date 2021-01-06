@@ -1,6 +1,10 @@
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <iostream>
+
 #include "perf.h"
 #include "matrix.h"
-#include <cstdio>
+#include "common.h"
 
 __constant__ float building_blocks[] = {
         0, 1,
@@ -240,10 +244,31 @@ __device__ float evaluate_multi(unsigned char *combination, float *coefs, float 
 }
 
 template<int D>
-__global__ void prepare_gels_batched(GPUMatrix measurements, int num_combinations, int num_buildingblocks,
+__global__ void prepare_gels_batched(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
                                      float *amatrices, float *cmatrices, float **amptrs, float **cmptrs) {
+
+    if constexpr(D == 2) {
+        num_combinations = 4;
+    } else if constexpr(D == 3) {
+        num_combinations = 23;
+    } else {
+        num_combinations = 2;
+    }
+
     // measurements should probably be a matrix
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
+    if(idx >= num_hypothesis)
+        return;
+
+    if(idx == 0) {
+        printf("HELLO THERE\n");
+    }
+
+    if(idx == 1200000) {
+        printf("HELLO THERE ME WERE NICE\n");
+    }
+
+    // TODO exit if index out of range
     float *amatrix = &amatrices[idx * (measurements.height * (D + 1))];
     float *cmatrix = &cmatrices[idx * measurements.height];
     amptrs[idx] = amatrix;
@@ -286,4 +311,63 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
         }
         cmatrix[i] = get_matrix_element(measurements, D, i);
     }
+}
+
+void find_hypothesis(const CPUMatrix &measurements) {
+    GPUMatrix device_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
+    matrix_upload(measurements, device_measurements);
+
+
+    int num_combinations = 333;
+    int num_buildingblocks = 39;
+    int num_hypothesis = -1;
+    float *amatrices, *cmatrices, **amptrs, **cmptrs;
+
+
+    int dimensions = measurements.width-1;
+    switch(dimensions) {
+        case 2:
+
+            break;
+        case 3:
+            num_combinations = 23;
+            // TODO num_buildingblocks anpassen
+            num_hypothesis = pow(num_buildingblocks, dimensions) * num_combinations;
+
+            cudaMalloc(&amatrices, num_hypothesis * measurements.height * (dimensions+1) * sizeof(float));
+            CUDA_CHECK_ERROR;
+            cudaMalloc(&cmatrices, num_hypothesis * measurements.height * sizeof(float));
+            CUDA_CHECK_ERROR;
+            cudaMalloc(&amptrs, num_hypothesis * sizeof(float*));
+            CUDA_CHECK_ERROR;
+            cudaMalloc(&cmptrs, num_hypothesis * sizeof(float*));
+            CUDA_CHECK_ERROR;
+
+            prepare_gels_batched<3><<<div_up(num_hypothesis, 1024), 1024>>>(device_measurements, num_combinations, num_buildingblocks, num_hypothesis, amatrices, cmatrices, amptrs, cmptrs);
+            cudaDeviceSynchronize();
+            CUDA_CHECK_ERROR;
+
+            break;
+        case 4:
+
+            break;
+        case 5:
+
+            break;
+
+        default:
+            std::cerr << "Finding hypothesis with dimensions " << dimensions << " is not supported!" << std::endl;
+            exit(EXIT_FAILURE);
+    }
+
+    cudaFree(amatrices);
+    CUDA_CHECK_ERROR;
+    cudaFree(cmatrices);
+    CUDA_CHECK_ERROR;
+    cudaFree(amptrs);
+    CUDA_CHECK_ERROR;
+    cudaFree(cmptrs);
+    CUDA_CHECK_ERROR;
+    matrix_free_gpu(device_measurements);
+    // TODO return the hypothesis
 }

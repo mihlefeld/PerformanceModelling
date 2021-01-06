@@ -7,4 +7,8 @@ int main(int argc, char** argv) {
         std::cout << "Usage: " << argv[0] << " <filename>" << std::endl;
         return 0;
     }
+
+    auto measurements = load_from_file(argv[1]);
+    find_hypothesis(measurements);
+    matrix_free_cpu(measurements);
 }
