@@ -1,4 +1,5 @@
 #include <iostream>
+#include "tests.h"
 #include "perf.h"
 
 int main(int argc, char** argv) {
@@ -6,6 +7,7 @@ int main(int argc, char** argv) {
         std::cout << "Usage: " << argv[0] << " <filename>" << std::endl;
         return 0;
     }
+    test();
 
     auto measurements = load_from_file(argv[1]);
     find_hypothesis(measurements);

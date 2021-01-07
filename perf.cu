@@ -57,7 +57,7 @@ __constant__ float building_blocks[] = {
         3, 1
 };
 
-__constant__ unsigned char combinations[23*3*3];
+__constant__ unsigned char combinations[256];
 
 unsigned char combinations_2d[] {
         1, 1, 0, 0,
@@ -227,11 +227,14 @@ __device__ void set_matrix_element(GPUMatrix m, int x, int y, float v) {
 template<int D>
 __device__ float evaluate_single(unsigned char *combination, float coef, float *ctps, float *params) {
     float prod = coef;
+    // if the combination is 0 0 0, zero should be returned, instead of prod
+    bool nonzero = 0;
     for (int i = 0; i < D; i++) {
+        nonzero |= combination[i];
         if (combination[i])
             prod *= pow(params[i], ctps[i*2]) * pow(log2(params[i]), ctps[i*2 + 1]);
     }
-    return prod;
+    return nonzero ? prod : 0;
 }
 
 // coefs has to be initialized with all 1s
@@ -258,26 +261,22 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
     amptrs[idx] = amatrix;
     cmptrs[idx] = cmatrix;
     float ctps[2*D];
-    unsigned char combination[D*D];
+    unsigned char *combination;
     /*
      * a*b*c + a*b + c
      * 1 1 1
      * 1 1 0
      * 0 0 1
      */
-
-    int combination_index = idx / num_combinations;
-    int mod_idx = combination_index % num_combinations;
-    for (int i = 0; i < D; i++) {
-        for (int j = 0; j < D; j++) {
-            combination[i*D + j] = combinations[combination_index * D * D + i * D + j];
-        }
-    }
+    int div_ci = num_hypothesis / num_combinations;
+    int combination_index = idx / div_ci;
+    int mod_idx = idx % div_ci;
+    combination = &combinations[combination_index * D * D];
 
     int r = pow(num_buildingblocks, D-1);
     for (int i = D - 1; i >= 0; i--) {
         int ctpi = mod_idx / r;
-        mod_idx = ctpi % r;
+        mod_idx = mod_idx % r;
         for (int j = 0; j < 2; j++) {
             ctps[i * 2 + j] = building_blocks[ctpi * 2 + j];
         }
@@ -286,6 +285,7 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
 
 #ifdef DEBUG
     if (idx == 0) {
+        printf("ci: %d\n", combination_index);
         float *ptr = get_matrix_element_ptr(measurements, 0, 0);
         for (int i = 0; i < D; i++) {
             printf("%f, ", ptr[i]);
@@ -301,12 +301,10 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
             printf("%f, ", y);
         }
         printf("\ncomb:\n");
-        for (int i = 0; i < D; i++) {
-            unsigned char *comptr = &combination[D * i];
-            for (int j = 0; j < D; j++) {
-                printf("%d, ", comptr[j]);
-            }
-            printf("\n");
+        for (int i = 0; i < D * D; i++) {
+            printf("%d, ", combinations[i]);
+            if (i % D == D-1)
+                printf("\n");
         }
     }
 #endif
@@ -345,11 +343,22 @@ void find_hypothesis_templated(
 
     // allocate and upload data
     matrix_upload(measurements, device_measurements);
-    CUDA_CALL(cudaMemcpyToSymbol(combinations, combinations_array, num_combinations, cudaMemcpyHostToDevice))
+    CUDA_CALL(cudaMemcpyToSymbol(combinations, combinations_array, num_combinations * D * D, cudaMemcpyHostToDevice))
     CUDA_CALL(cudaMalloc(&amatrices, num_hypothesis * measurements.height * (D+1) * sizeof(float)))
     CUDA_CALL(cudaMalloc(&cmatrices, num_hypothesis * measurements.height * sizeof(float)))
     CUDA_CALL(cudaMalloc(&amptrs, num_hypothesis * sizeof(float*)))
     CUDA_CALL(cudaMalloc(&cmptrs, num_hypothesis * sizeof(float*)))
+
+    // test if combinations are copied correctly
+    unsigned char combtest[23*3*3];
+    cudaMemcpyFromSymbol(combtest, combinations, num_combinations * D * D, cudaMemcpyDeviceToHost);
+    printf("Combinations CPU: \n");
+    for (int i = 0; i < D * D; i++) {
+        printf("%d, ", combtest[i]);
+        if (i % D == D-1)
+            printf("\n");
+    }
+
 
     prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
             device_measurements,
