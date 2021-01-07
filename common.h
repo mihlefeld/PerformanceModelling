@@ -25,6 +25,17 @@
     }                                                                   \
 }
 
+#define CUDA_CALL(call)                                                        \
+{                                                                              \
+    cudaError_t err = call;                                                    \
+    if (err != cudaSuccess) {                                                  \
+            const char *const err_str = cudaGetErrorString(err);               \
+            std::cerr << "Cuda error in " << __FILE__ << ":" << __LINE__ - 1   \
+                      << ": " << err_str << " (" << err << ")" << std::endl;   \
+            exit(EXIT_FAILURE);                                                \
+    }                                                                          \
+}
+
 
 inline unsigned int div_up(unsigned int numerator, unsigned int denominator)
 {

@@ -324,83 +324,102 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
     }
 }
 
-void find_hypothesis(const CPUMatrix &measurements) {
-    cudaSetDevice(5);
-
+template<int D>
+void find_hypothesis_templated(
+        int num_buildingblocks,
+        int num_combinations,
+        unsigned char *combinations_array,
+        const CPUMatrix &measurements
+    )
+{
     cublasHandle_t handle;
-
-    GPUMatrix device_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
-    matrix_upload(measurements, device_measurements);
-
-
-    CPUMatrix A, X, C;
-    int num_combinations = 333;
-    int num_buildingblocks = 39;
-    int num_hypothesis = -1;
-    float *amatrices, *cmatrices, **amptrs, **cmptrs;
-    int dimensions = measurements.width-1;
-    auto *yvec = new float[measurements.height];
-    auto *amat = new float[(dimensions + 1) * measurements.height];
-    auto *coefs = new float[dimensions + 1];
     int info;
+    int num_hypothesis = pow(num_buildingblocks, D) * num_combinations;
+    float *amatrices, *cmatrices, **amptrs, **cmptrs;
+    GPUMatrix device_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
+
+    // download pointers for testing
+    CPUMatrix A = matrix_alloc_cpu(measurements.height, D + 1);
+    CPUMatrix X = matrix_alloc_cpu(1, D + 1);
+    CPUMatrix C = matrix_alloc_cpu(1, measurements.height);
+
+    // allocate and upload data
+    matrix_upload(measurements, device_measurements);
+    CUDA_CALL(cudaMemcpyToSymbol(combinations, combinations_array, num_combinations, cudaMemcpyHostToDevice))
+    CUDA_CALL(cudaMalloc(&amatrices, num_hypothesis * measurements.height * (D+1) * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&cmatrices, num_hypothesis * measurements.height * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&amptrs, num_hypothesis * sizeof(float*)))
+    CUDA_CALL(cudaMalloc(&cmptrs, num_hypothesis * sizeof(float*)))
+
+    prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
+            device_measurements,
+            num_combinations,
+            num_buildingblocks,
+            num_hypothesis,
+            amatrices,
+            cmatrices,
+            amptrs,
+            cmptrs
+    );
+
+    // download data for testing
+    CUDA_CALL(cudaMemcpy(C.elements, cmatrices, measurements.height * sizeof(float), cudaMemcpyDeviceToHost))
+    CUDA_CALL(cudaMemcpy(A.elements, amatrices, measurements.height * (D + 1) * sizeof(float), cudaMemcpyDeviceToHost))
+
+    CUBLAS_CALL(cublasCreate(&handle));
+    CUBLAS_CALL(cublasSgelsBatched(
+            handle,
+            CUBLAS_OP_N,
+            measurements.height, // height of Aarray
+            D + 1, // width of Aarray and height of Carray
+            1, // width of Carray
+            amptrs, // Aarray pointer
+            measurements.height, // lda >= max(1,m)
+            cmptrs, // Carray pointer
+            measurements.height, // ldc >= max(1,m)
+            &info,
+            nullptr,
+            num_hypothesis
+        )
+    )
+
+    // download and print computed coefficients for testing
+    CUDA_CALL(cudaMemcpy(X.elements, cmatrices, (D + 1) * sizeof(float), cudaMemcpyDeviceToHost))
+    printf("A:\n");
+    matrix_print(A);
+    printf("X:\n");
+    matrix_print(X);
+    printf("C:\n");
+    matrix_print(C);
+    printf("Done");
+
+    matrix_free_cpu(A);
+    matrix_free_cpu(X);
+    matrix_free_cpu(C);
+    CUDA_CALL(cudaFree(amatrices))
+    CUDA_CALL(cudaFree(cmatrices))
+    CUDA_CALL(cudaFree(amptrs))
+    CUDA_CALL(cudaFree(cmptrs))
+    matrix_free_gpu(device_measurements);
+}
+
+void find_hypothesis(const CPUMatrix &measurements) {
+    cublasHandle_t handle;
+    int num_combinations;
+    int num_buildingblocks = 39;
+    int dimensions = measurements.width-1;
     switch(dimensions) {
         case 2:
 
             break;
         case 3:
             num_combinations = 23;
-            // TODO num_buildingblocks anpassen
-            num_hypothesis = pow(num_buildingblocks, dimensions) * num_combinations;
-
-            cudaMemcpyToSymbol(combinations, combinations_3d, num_combinations, cudaMemcpyHostToDevice);
-
-            cudaMalloc(&amatrices, num_hypothesis * measurements.height * (dimensions+1) * sizeof(float));
-            CUDA_CHECK_ERROR;
-            cudaMalloc(&cmatrices, num_hypothesis * measurements.height * sizeof(float));
-            CUDA_CHECK_ERROR;
-            cudaMalloc(&amptrs, num_hypothesis * sizeof(float*));
-            CUDA_CHECK_ERROR;
-            cudaMalloc(&cmptrs, num_hypothesis * sizeof(float*));
-            CUDA_CHECK_ERROR;
-
-            prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(device_measurements, num_combinations, num_buildingblocks, num_hypothesis, amatrices, cmatrices, amptrs, cmptrs);
-            cudaDeviceSynchronize();
-            CUDA_CHECK_ERROR;
-
-            cudaMemcpy(yvec, cmatrices, measurements.height * sizeof(float), cudaMemcpyDeviceToHost);
-            cudaMemcpy(amat, amatrices, measurements.height * (dimensions + 1) * sizeof(float), cudaMemcpyDeviceToHost);
-
-            CUBLAS_CALL(cublasCreate(&handle));
-            CUBLAS_CALL(cublasSgelsBatched(
-                    handle,
-                    CUBLAS_OP_N,
-                    measurements.height, // height of Aarray
-                    dimensions + 1, // width of Aarray and height of Carray
-                    1, // width of Carray
-                    amptrs, // Aarray pointer
-                    measurements.height, // lda >= max(1,m)
-                    cmptrs, // Carray pointer
-                    measurements.height, // ldc >= max(1,m)
-                    &info,
-                    nullptr,
-                    num_hypothesis
-                )
-            )
-
-            cudaMemcpy(coefs, cmatrices, (dimensions + 1) * sizeof(float), cudaMemcpyDeviceToHost);
-
-            X.width = 1; X.height = dimensions + 1; X.elements = coefs;
-            C.width = 1; C.height = measurements.height; C.elements = yvec;
-            A.width = measurements.height; A.height = dimensions + 1; A.elements = amat;
-            printf("A:\n");
-            matrix_print(A);
-            printf("X:\n");
-            matrix_print(X);
-            printf("C:\n");
-            matrix_print(C);
-            printf("Done");
-
-
+            find_hypothesis_templated<3>(
+                    num_buildingblocks,
+                    num_combinations,
+                    combinations_3d,
+                    measurements
+            );
 
             break;
         case 4:
@@ -415,14 +434,5 @@ void find_hypothesis(const CPUMatrix &measurements) {
             exit(EXIT_FAILURE);
     }
 
-    cudaFree(amatrices);
-    CUDA_CHECK_ERROR;
-    cudaFree(cmatrices);
-    CUDA_CHECK_ERROR;
-    cudaFree(amptrs);
-    CUDA_CHECK_ERROR;
-    cudaFree(cmptrs);
-    CUDA_CHECK_ERROR;
-    matrix_free_gpu(device_measurements);
     // TODO return the hypothesis
 }

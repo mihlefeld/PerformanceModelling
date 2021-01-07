@@ -25,29 +25,40 @@ GPUMatrix matrix_alloc_gpu(int width, int height)
     GPUMatrix mat{};
     mat.width = width;
     mat.height = height;
-    cudaMallocPitch(&mat.elements, &mat.pitch, width * sizeof(float), height);
-    CUDA_CHECK_ERROR;
+    CUDA_CALL(cudaMallocPitch(&mat.elements, &mat.pitch, width * sizeof(float), height))
     return mat;
 }
 
 void matrix_free_gpu(GPUMatrix &m)
 {
-    cudaFree(m.elements);
+    CUDA_CALL(cudaFree(m.elements))
 }
 
 void matrix_upload(const CPUMatrix &src, GPUMatrix &dst)
 {
-    cudaMemcpy2D(dst.elements, dst.pitch, src.elements, src.width * sizeof(float),
-                 src.width * sizeof(float), src.height,
-                 cudaMemcpyHostToDevice);
-    CUDA_CHECK_ERROR;
+    CUDA_CALL(cudaMemcpy2D(
+            dst.elements,
+            dst.pitch,
+            src.elements,
+            src.width * sizeof(float),
+            src.width * sizeof(float),
+            src.height,
+            cudaMemcpyHostToDevice
+        )
+    )
 }
 void matrix_download(const GPUMatrix &src, CPUMatrix &dst)
 {
-    cudaMemcpy2D(dst.elements, dst.width * sizeof(float), src.elements, src.pitch,
-                 src.width * sizeof(float), src.height,
-                 cudaMemcpyDeviceToHost);
-    CUDA_CHECK_ERROR;
+    CUDA_CALL(cudaMemcpy2D(
+            dst.elements,
+            dst.width * sizeof(float),
+            src.elements,
+            src.pitch,
+            src.width * sizeof(float),
+            src.height,
+            cudaMemcpyDeviceToHost
+        )
+    )
 }
 
 void matrix_compare_cpu(const CPUMatrix &a, const CPUMatrix &b)
