@@ -61,6 +61,10 @@ __constant__ float building_blocks[] = {
 
 __constant__ unsigned char combinations[256];
 
+int combinations_2d_column_counts[] {
+    0, 1
+};
+
 unsigned char combinations_2d[] {
         1, 1,
         0, 0,
@@ -75,121 +79,132 @@ unsigned char combinations_2d[] {
         0, 1
 };
 
+// combination counts: element at index i determines where the combinations
+// with i + 2 columns start if -1, the combinations using that many columns are not present
+
+int combinations_3d_start_indices[] {
+    0, 1, 11
+};
+
 unsigned char combinations_3d[] {
-    // x*y*z
+    // 1c: x*y*z
     1, 1, 1,
     0, 0, 0,
     0, 0, 0,
 
-    // x+y+z
-    1, 0, 0,
-    0, 1, 0,
-    0, 0, 1,
-
-    // x*y*z + x
+    // 2c: x*y*z + x
     1, 1, 1,
     1, 0, 0,
     0, 0, 0,
 
-    // x*y*z + y
+    // 2c: x*y*z + y
     1, 1, 1,
     0, 1, 0,
     0, 0, 0,
 
-    // x*y*z + z
+    // 2c: x*y*z + z
     1, 1, 1,
     0, 0, 1,
     0, 0, 0,
 
-    // x*y*z + x*y
+    // 2c: x*y*z + x*y
     1, 1, 1,
     1, 1, 0,
     0, 0, 0,
 
-    // x*y*z + y*z
+    // 2c: x*y*z + y*z
     1, 1, 1,
     0, 1, 1,
     0, 0, 0,
 
-    // x*y*z + x*z
+    // 2c: x*y*z + x*z
     1, 1, 1,
     1, 0, 1,
     0, 0, 0,
 
-    // x*y*z + x*y + z
-    1, 1, 1,
-    1, 1, 0,
-    0, 0, 1,
-
-    // x*y*z + y*z + x
-    1, 1, 1,
-    0, 1, 1,
-    1, 0, 0,
-
-    // x*y*z + x*z + y
-    1, 1, 1,
-    1, 0, 1,
-    0, 1, 0,
-
-    // x*y*z + x + y
-    1, 1, 1,
-    1, 0, 0,
-    0, 1, 0,
-
-    // x*y*z + x + z
-    1, 1, 1,
-    1, 0, 0,
-    0, 0, 1,
-
-    // x*y*z + y + z
-    1, 1, 1,
-    0, 1, 0,
-    0, 0, 1,
-
-    // x*y + z
+    // 2c: x*y + z
     1, 1, 0,
     0, 0, 1,
     0, 0, 0,
 
-    // x*y + z + y
-    1, 1, 0,
-    0, 0, 1,
-    0, 1, 0,
-
-    // x*y + z + x
-    1, 1, 0,
-    0, 0, 1,
-    1, 0, 0,
-
-    // x*z + y
+    // 2c: x*z + y
     1, 0, 1,
     0, 1, 0,
     0, 0, 0,
 
-    // x*z + y + x
+    // 2c: x*z + x
+    0, 1, 1,
+    1, 0, 0,
+    0, 0, 0,
+
+    // 2c: y*z + x
+    0, 1, 1,
+    1, 0, 0,
+    0, 0, 0,
+
+    // 3c: x+y+z
+    1, 0, 0,
+    0, 1, 0,
+    0, 0, 1,
+
+    // 3c: x*y*z + x*y + z
+    1, 1, 1,
+    1, 1, 0,
+    0, 0, 1,
+
+    // 3c: x*y*z + y*z + x
+    1, 1, 1,
+    0, 1, 1,
+    1, 0, 0,
+
+    // 3c: x*y*z + x*z + y
+    1, 1, 1,
+    1, 0, 1,
+    0, 1, 0,
+
+    // 3c: x*y*z + x + y
+    1, 1, 1,
+    1, 0, 0,
+    0, 1, 0,
+
+    // 3c: x*y*z + x + z
+    1, 1, 1,
+    1, 0, 0,
+    0, 0, 1,
+
+    // 3c: x*y*z + y + z
+    1, 1, 1,
+    0, 1, 0,
+    0, 0, 1,
+
+    // 3c: x*y + z + y
+    1, 1, 0,
+    0, 0, 1,
+    0, 1, 0,
+
+    // 3c: x*y + z + x
+    1, 1, 0,
+    0, 0, 1,
+    1, 0, 0,
+
+    // 3c: x*z + y + x
     1, 0, 1,
     0, 1, 0,
     1, 0, 0,
 
-    // x*z + x
-    0, 1, 1,
-    1, 0, 0,
-    0, 0, 0,
-
-    // y*z + x
-    0, 1, 1,
-    1, 0, 0,
-    0, 0, 0,
-
-    // y*z + x + y
+    // 3c: y*z + x + y
     0, 1, 1,
     1, 0, 0,
     0, 1, 0,
 
-    // y*z + x + z
+    // 3c: y*z + x + z
     0, 1, 1,
     1, 0, 0,
     0, 0, 1,
+};
+
+int combinations_4d_start_indices[] {
+    0, -1, -1, 1
 };
 
 unsigned char combinations_4d[] {
@@ -204,13 +219,16 @@ unsigned char combinations_4d[] {
     0, 0, 0, 1
 };
 
+int combinations_5d_start_indices[] {
+    0, -1, -1, -1, 1
+};
+
 unsigned char combinations_5d[] {
     1, 1, 1, 1, 1,
     0, 0, 0, 0, 0,
     0, 0, 0, 0, 0,
     0, 0, 0, 0, 0,
     0, 0, 0, 0, 0,
-
 
     1, 0, 0, 0, 0,
     0, 1, 0, 0, 0,
@@ -234,7 +252,7 @@ __device__ void set_matrix_element(GPUMatrix m, int x, int y, float v) {
 }
 
 template<int D>
-__device__ float evaluate_single(unsigned char *combination, float coef, float *ctps, float *params, float eps) {
+__device__ float evaluate_single(unsigned char *combination, float coef, float *ctps, float *params) {
     float prod = coef;
     // if the combination is 0 0 0, zero should be returned, instead of prod
     bool nonzero = 0;
@@ -243,7 +261,7 @@ __device__ float evaluate_single(unsigned char *combination, float coef, float *
         if (combination[i])
             prod *= pow(params[i], ctps[i*2]) * pow(log2(params[i]), ctps[i*2 + 1]);
     }
-    return nonzero ? prod : eps;
+    return nonzero ? prod : 0;
 }
 
 // coefs has to be initialized with all 1s
@@ -331,14 +349,15 @@ void find_hypothesis_templated(
         int num_buildingblocks,
         int num_combinations,
         unsigned char *combinations_array,
+        int *start_indices,
         const CPUMatrix &measurements
     )
 {
     cublasHandle_t handle;
     int info;
     int num_hypothesis = pow(num_buildingblocks, D) * num_combinations;
+    int hypothesis_per_combination = num_hypothesis / num_combinations;
     int *dev_info_array;
-    printf("IDX: %d\n", 22 * (num_hypothesis / num_combinations));
     float *amatrices, *cmatrices, **amptrs, **cmptrs;
     GPUMatrix device_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
 
@@ -372,29 +391,36 @@ void find_hypothesis_templated(
     CUDA_CALL(cudaMemcpy(A.elements, amatrices + (DEBUG_IDX * measurements.height * (D + 1)), measurements.height * (D + 1) * sizeof(float), cudaMemcpyDeviceToHost))
 
     CUBLAS_CALL(cublasCreate(&handle));
-    CUBLAS_CALL(cublasSgelsBatched(
-            handle,
-            CUBLAS_OP_N,
-            measurements.height, // height of Aarray
-            D + 1, // width of Aarray and height of Carray
-            1, // width of Carray
-            amptrs, // Aarray pointer
-            measurements.height, // lda >= max(1,m)
-            cmptrs, // Carray pointer
-            measurements.height, // ldc >= max(1,m)
-            &info,
-            dev_info_array,
-            num_hypothesis
+    int previous_start_index = 0;
+    for (int i = 0; i < D; i++) {
+        int start_index = start_indices[i];
+        if (start_index == -1) continue;
+        int combination_count = start_index - previous_start_index + 1;
+        CUBLAS_CALL(cublasSgelsBatched(
+                handle,
+                CUBLAS_OP_N,
+                measurements.height, // height of Aarray
+                i + 2, // width of Aarray and height of Carray
+                1, // width of Carray
+                amptrs + (hypothesis_per_combination * start_index), // Aarray pointer
+                measurements.height, // lda >= max(1,m)
+                cmptrs + (hypothesis_per_combination * start_index), // Carray pointer
+                measurements.height, // ldc >= max(1,m)
+                &info,
+                dev_info_array,
+                combination_count * hypothesis_per_combination
+            )
         )
-    )
+        int host_info;
+        CUDA_CALL(cudaMemcpy(&host_info, dev_info_array + DEBUG_IDX, sizeof(int), cudaMemcpyDeviceToHost))
+        printf("Debug host info: %d\n", host_info);
+        previous_start_index = start_index;
+    }
 
     // download and print computed coefficients for testing
     CUDA_CALL(cudaMemcpy(X.elements, cmatrices + (DEBUG_IDX * measurements.height), (D + 1) * sizeof(float), cudaMemcpyDeviceToHost))
-    int host_info;
-    CUDA_CALL(cudaMemcpy(&host_info, dev_info_array + DEBUG_IDX, sizeof(int), cudaMemcpyDeviceToHost))
-    printf("Debug host info: %d\n", host_info);
-    /*printf("A:\n");
-    matrix_print(A);*/
+    printf("A:\n");
+    matrix_print(A);
     printf("X:\n");
     matrix_print(X);
     printf("Done");
@@ -424,6 +450,7 @@ void find_hypothesis(const CPUMatrix &measurements) {
                     num_buildingblocks,
                     num_combinations,
                     combinations_3d,
+                    combinations_3d_start_indices,
                     measurements
             );
 
