@@ -72,12 +72,15 @@ void matrix_compare_cpu(const CPUMatrix &a, const CPUMatrix &b)
 }
 
 void matrix_print(const CPUMatrix &m) {
+    std::cout << "[" << std::endl;
     for (int y = 0; y < m.height; y++) {
+        std::cout << "[";
         for (int x = 0; x < m.width; x++) {
-            std::cout << m.elements[y * m.width + x] << " ";
+            std::cout << m.elements[y * m.width + x] << ", ";
         }
-        std::cout << std::endl;
+        std::cout << "]," << std::endl;
     }
+    std::cout << "]" << std::endl;
 }
 
 CPUMatrix load_from_file(const std::string& filename) {
