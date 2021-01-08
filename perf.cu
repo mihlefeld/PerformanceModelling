@@ -276,29 +276,12 @@ __device__ float evaluate_multi(unsigned char *combination, float *coefs, float 
 }
 
 template<int D>
-__global__ void prepare_gels_batched(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
-                                     float *amatrices, float *cmatrices, float **amptrs, float **cmptrs) {
-    // measurements should probably be a matrix
-    int idx = blockDim.x * blockIdx.x + threadIdx.x;
-    if(idx >= num_hypothesis)
-        return;
-
-    float *amatrix = &amatrices[idx * (measurements.height * (D + 1))];
-    float *cmatrix = &cmatrices[idx * measurements.height];
-    amptrs[idx] = amatrix;
-    cmptrs[idx] = cmatrix;
-    float ctps[2*D];
-    unsigned char *combination;
-    /*
-     * a*b*c + a*b + c
-     * 1 1 1
-     * 1 1 0
-     * 0 0 1
-     */
+__device__ void get_data_from_indx(int idx, float *ctps, unsigned char **combination,
+                                   int num_combinations, int num_buildingblocks, int num_hypothesis) {
     int div_ci = num_hypothesis / num_combinations;
     int combination_index = idx / div_ci;
     int mod_idx = idx  % div_ci;
-    combination = &combinations[combination_index * D * D];
+    *combination = &combinations[combination_index * D * D];
 
     int r = pow(num_buildingblocks, D-1);
     for (int i = D - 1; i >= 0; i--) {
@@ -309,27 +292,23 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
         }
         r/= num_buildingblocks;
     }
+}
 
-#ifdef DEBUG
-    // 22
-    if (idx == DEBUG_IDX) {
-        printf("ci: %d\n", combination_index);
-        float *ptr = get_matrix_element_ptr(measurements, 0, 0);
-        for (int i = 0; i < D; i++) {
-            printf("%f, ", ptr[i]);
-        }
-        printf("\nctps: ");
-        for (int i = 0; i < D; i++) {
-            printf("(%f, %f), ", ctps[i*2], ctps[i*2 + 1]);
-        }
-        printf("\ncomb:\n");
-        for (int i = 0; i < D * D; i++) {
-            printf("%d, ", combinations[combination_index * D * D + i]);
-            if (i % D == D-1)
-                printf("\n");
-        }
-    }
-#endif
+template<int D>
+__global__ void prepare_gels_batched(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
+                                     float *amatrices, float *cmatrices, float **amptrs, float **cmptrs) {
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+    if(idx >= num_hypothesis)
+        return;
+
+    float *amatrix = &amatrices[idx * (measurements.height * (D + 1))];
+    float *cmatrix = &cmatrices[idx * measurements.height];
+    amptrs[idx] = amatrix;
+    cmptrs[idx] = cmatrix;
+    float ctps[2*D];
+    unsigned char *combination;
+
+    get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
 
     for (int i = 0; i < measurements.height; i++) {
         // first element in every row should be 1, since there's always a constant component
@@ -342,6 +321,35 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
         }
         cmatrix[i] = get_matrix_element(measurements, D, i);
     }
+}
+
+template<int D>
+__global__ void compute_costs(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
+                              float *cmatrices, float *rss_costs, float *smape_costs) {
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+    if(idx >= num_hypothesis)
+        return;
+    float ctps[2*D];
+    float *coefs = &cmatrices[idx * measurements.height];
+    unsigned char *combination;
+    get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
+
+    float rss_cost = 0;
+    float smape_cost = 0;
+
+    // assume the validation measurement is the last row in the matrix
+    int i = measurements.height - 1;
+    float *row_ptr = get_matrix_element_ptr(measurements, 0, i);
+    float actual = row_ptr[D];
+    float predicted = evaluate_multi<D>(combination, coefs, ctps, row_ptr);
+    rss_cost = pow(predicted - actual, 2);
+    float abssum = (abs(predicted) + abs(actual));
+    if (abssum != 0)
+        smape_cost = abs(predicted - actual) / (abs(predicted) + abs(actual));
+
+    // TODO: don't forget to set all errors to zero before calling the cost functions
+    rss_costs[idx] += rss_cost;
+    smape_costs[idx] += 200 * smape_cost / (measurements.height - 1);
 }
 
 template<int D>
@@ -358,7 +366,7 @@ void find_hypothesis_templated(
     int num_hypothesis = pow(num_buildingblocks, D) * num_combinations;
     int hypothesis_per_combination = num_hypothesis / num_combinations;
     int *dev_info_array;
-    float *amatrices, *cmatrices, **amptrs, **cmptrs;
+    float *amatrices, *cmatrices, **amptrs, **cmptrs, *rss_costs, *smape_costs;
     GPUMatrix device_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
 
     // download pointers for testing
@@ -369,11 +377,15 @@ void find_hypothesis_templated(
     // allocate and upload data
     matrix_upload(measurements, device_measurements);
     CUDA_CALL(cudaMemcpyToSymbol(combinations, combinations_array, num_combinations * D * D, 0, cudaMemcpyHostToDevice))
+    CUDA_CALL(cudaMalloc(&rss_costs, num_hypothesis * sizeof(float)));
+    CUDA_CALL(cudaMalloc(&smape_costs, num_hypothesis * sizeof(float)));
     CUDA_CALL(cudaMalloc(&dev_info_array, num_hypothesis * sizeof(int)));
     CUDA_CALL(cudaMalloc(&amatrices, num_hypothesis * measurements.height * (D+1) * sizeof(float)))
     CUDA_CALL(cudaMalloc(&cmatrices, num_hypothesis * measurements.height * sizeof(float)))
     CUDA_CALL(cudaMalloc(&amptrs, num_hypothesis * sizeof(float*)))
     CUDA_CALL(cudaMalloc(&cmptrs, num_hypothesis * sizeof(float*)))
+    CUDA_CALL(cudaMemset(rss_costs, 0, num_hypothesis * sizeof(float)))
+    CUDA_CALL(cudaMemset(smape_costs, 0, num_hypothesis * sizeof(float)))
 
     prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
             device_measurements,
@@ -417,12 +429,20 @@ void find_hypothesis_templated(
         previous_start_index = start_index;
     }
 
+    compute_costs<D><<<div_up(num_hypothesis, 512), 512>>>(device_measurements, num_combinations, num_buildingblocks,
+                                                           num_hypothesis, cmatrices, rss_costs, smape_costs);
+
     // download and print computed coefficients for testing
+    float rss, smape;
     CUDA_CALL(cudaMemcpy(X.elements, cmatrices + (DEBUG_IDX * measurements.height), (D + 1) * sizeof(float), cudaMemcpyDeviceToHost))
+    CUDA_CALL(cudaMemcpy(&rss, rss_costs + DEBUG_IDX, sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CALL(cudaMemcpy(&smape, smape_costs + DEBUG_IDX, sizeof(float), cudaMemcpyDeviceToHost));
     printf("A:\n");
     matrix_print(A);
     printf("X:\n");
     matrix_print(X);
+    printf("RSSE  = %f\n", rss);
+    printf("SMAPE = %f\n", smape);
     printf("Done");
 
     matrix_free_cpu(A);
@@ -432,6 +452,8 @@ void find_hypothesis_templated(
     CUDA_CALL(cudaFree(cmatrices))
     CUDA_CALL(cudaFree(amptrs))
     CUDA_CALL(cudaFree(cmptrs))
+    CUDA_CALL(cudaFree(rss_costs))
+    CUDA_CALL(cudaFree(smape_costs))
     matrix_free_gpu(device_measurements);
 }
 
