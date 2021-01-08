@@ -313,13 +313,19 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
     for (int i = 0; i < measurements.height; i++) {
         // first element in every row should be 1, since there's always a constant component
         amatrix[i] = 1;
-        for (int j = 0; j < D; j++) {
+    }
+
+    for (int i = 0; i < measurements.height; i++) {
+        cmatrix[i] = get_matrix_element(measurements, D, i);
+    }
+
+    for (int j = 0; j < D; j++) {
+        for (int i = 0; i < measurements.height; i++) {
             // this value needs to be written into a giant list of matrices
             float y = evaluate_single<D>(&combination[D*j], 1, ctps, get_matrix_element_ptr(measurements, 0, i));
             // danger danger, amatrix must be column major format
             amatrix[(j + 1) * measurements.height + i] = y;
         }
-        cmatrix[i] = get_matrix_element(measurements, D, i);
     }
 }
 
@@ -454,6 +460,7 @@ void find_hypothesis_templated(
     CUDA_CALL(cudaFree(cmptrs))
     CUDA_CALL(cudaFree(rss_costs))
     CUDA_CALL(cudaFree(smape_costs))
+    CUDA_CALL(cudaFree(dev_info_array))
     matrix_free_gpu(device_measurements);
 }
 
