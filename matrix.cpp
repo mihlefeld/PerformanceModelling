@@ -112,7 +112,7 @@ CPUMatrix load_from_file(const std::string& filename) {
         float num;
         for(int i = 0; i < dimensions+1; i++) {
             file >> num;
-            measurements.elements[row*(dimensions + 1) + i] = num;
+            measurements.elements[i*measurements.height + row] = num;
         }
     }
 
