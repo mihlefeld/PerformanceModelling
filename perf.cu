@@ -296,7 +296,7 @@ __device__ void get_data_from_indx(int idx, float *ctps, unsigned char **combina
 
 template<int D>
 __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
-                                     float *amatrices, float *cmatrices, float **amptrs, float **cmptrs) {
+                                     float *amatrices, float *cmatrices, float **amptrs, float **cmptrs, int swap_indx) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     if(idx >= num_hypothesis)
         return;
@@ -316,13 +316,16 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
     }
 
     for (int i = 0; i < measurements.height; i++) {
-        cmatrix[i] = get_matrix_element(measurements, D, i);
+        // TODO: seperate coordinates and values
+        int ii = i == swap_indx ? (measurements.height - 1) : (i == measurements.height - 1 ? swap_indx : i);
+        cmatrix[i] = get_matrix_element(measurements, D, ii);
     }
 
     for (int j = 0; j < D; j++) {
         for (int i = 0; i < measurements.height; i++) {
+            int ii = i == swap_indx ? (measurements.height - 1) : (i == measurements.height - 1 ? swap_indx : i);
             // this value needs to be written into a giant list of matrices
-            float y = evaluate_single<D>(&combination[D*j], 1, ctps, get_matrix_element_ptr(measurements, 0, i));
+            float y = evaluate_single<D>(&combination[D*j], 1, ctps, get_matrix_element_ptr(measurements, 0, ii));
             // danger danger, amatrix must be column major format
             amatrix[(j + 1) * measurements.height + i] = y;
         }
@@ -393,63 +396,47 @@ void find_hypothesis_templated(
     CUDA_CALL(cudaMemset(rss_costs, 0, num_hypothesis * sizeof(float)))
     CUDA_CALL(cudaMemset(smape_costs, 0, num_hypothesis * sizeof(float)))
 
-    prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
-            device_measurements,
-            num_combinations,
-            num_buildingblocks,
-            num_hypothesis,
-            amatrices,
-            cmatrices,
-            amptrs,
-            cmptrs
-    );
-
-    // download data for testing
-    CUDA_CALL(cudaMemcpy(C.elements, cmatrices + (DEBUG_IDX * measurements.height), measurements.height * sizeof(float), cudaMemcpyDeviceToHost))
-    CUDA_CALL(cudaMemcpy(A.elements, amatrices + (DEBUG_IDX * measurements.height * (D + 1)), measurements.height * (D + 1) * sizeof(float), cudaMemcpyDeviceToHost))
-
     CUBLAS_CALL(cublasCreate(&handle));
-    int previous_start_index = 0;
-    for (int i = 0; i < D; i++) {
-        int start_index = start_indices[i];
-        if (start_index == -1) continue;
-        int combination_count = start_index - previous_start_index + 1;
-        CUBLAS_CALL(cublasSgelsBatched(
-                handle,
-                CUBLAS_OP_N,
-                measurements.height, // height of Aarray
-                i + 2, // width of Aarray and height of Carray
-                1, // width of Carray
-                amptrs + (hypothesis_per_combination * start_index), // Aarray pointer
-                measurements.height, // lda >= max(1,m)
-                cmptrs + (hypothesis_per_combination * start_index), // Carray pointer
-                measurements.height, // ldc >= max(1,m)
-                &info,
-                dev_info_array,
-                combination_count * hypothesis_per_combination
+
+    for (int i = 0; i < measurements.height - 1; i++) {
+        prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
+                device_measurements,
+                num_combinations,
+                num_buildingblocks,
+                num_hypothesis,
+                amatrices,
+                cmatrices,
+                amptrs,
+                cmptrs,
+                i
+        );
+
+        int previous_start_index = 0;
+        for (int i = 0; i < D; i++) {
+            int start_index = start_indices[i];
+            if (start_index == -1) continue;
+            int combination_count = start_index - previous_start_index + 1;
+            CUBLAS_CALL(cublasSgelsBatched(
+                    handle,
+                    CUBLAS_OP_N,
+                    measurements.height, // height of Aarray
+                    i + 2, // width of Aarray and height of Carray
+                    1, // width of Carray
+                    amptrs + (hypothesis_per_combination * start_index), // Aarray pointer
+                    measurements.height, // lda >= max(1,m)
+                    cmptrs + (hypothesis_per_combination * start_index), // Carray pointer
+                    measurements.height, // ldc >= max(1,m)
+                    &info,
+                    dev_info_array,
+                    combination_count * hypothesis_per_combination
+                )
             )
-        )
-        int host_info;
-        CUDA_CALL(cudaMemcpy(&host_info, dev_info_array + DEBUG_IDX, sizeof(int), cudaMemcpyDeviceToHost))
-        printf("Debug host info: %d\n", host_info);
-        previous_start_index = start_index;
+            previous_start_index = start_index;
+        }
+
+        compute_costs<D><<<div_up(num_hypothesis, 512), 512>>>(device_measurements, num_combinations, num_buildingblocks,
+                                                               num_hypothesis, cmatrices, rss_costs, smape_costs);
     }
-
-    compute_costs<D><<<div_up(num_hypothesis, 512), 512>>>(device_measurements, num_combinations, num_buildingblocks,
-                                                           num_hypothesis, cmatrices, rss_costs, smape_costs);
-
-    // download and print computed coefficients for testing
-    float rss, smape;
-    CUDA_CALL(cudaMemcpy(X.elements, cmatrices + (DEBUG_IDX * measurements.height), (D + 1) * sizeof(float), cudaMemcpyDeviceToHost))
-    CUDA_CALL(cudaMemcpy(&rss, rss_costs + DEBUG_IDX, sizeof(float), cudaMemcpyDeviceToHost));
-    CUDA_CALL(cudaMemcpy(&smape, smape_costs + DEBUG_IDX, sizeof(float), cudaMemcpyDeviceToHost));
-    printf("A:\n");
-    matrix_print(A);
-    printf("X:\n");
-    matrix_print(X);
-    printf("RSSE  = %f\n", rss);
-    printf("SMAPE = %f\n", smape);
-    printf("Done");
 
     matrix_free_cpu(A);
     matrix_free_cpu(X);
