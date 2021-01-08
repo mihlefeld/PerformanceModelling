@@ -1,6 +1,7 @@
 #define DEBUG
 #define DEBUG_IDX 0 * 59319
 #include <limits>
+#include <algorithm>
 #include <cuda_runtime.h>
 #include <cstdio>
 #include <iostream>
@@ -362,6 +363,34 @@ __global__ void compute_costs(GPUMatrix measurements, int num_combinations, int 
 }
 
 template<int D>
+__global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations, int num_buildingblocks, int num_hypothesis, GPUMatrix measurements, float* cmatrices) {
+    int idx = minimum_rss_cost_idx;
+
+    float ctps[2*D];
+    float *coefs = &cmatrices[idx * measurements.height];
+    unsigned char *combination;
+    get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
+
+    float* params = get_matrix_element_ptr(measurements, 0, 0);
+    float predicted = evaluate_multi<D>(combination, coefs, ctps, params);
+    float actual = get_matrix_element(measurements, D, 0);
+
+    printf("predicted value: %f\tactual value: %f\ncoefs:", predicted, actual);
+    for(int i = 0; i < D+1; i++) {
+        printf("%f, ", coefs[i]);
+    }
+    printf("\nctps: ");
+    for(int i = 0; i < D; i++) {
+        printf("(%f, %f), ", ctps[2*i], ctps[2*i+1]);
+    }
+    printf("\nparams: ");
+    for(int i = 0; i < D; i++) {
+        printf("%f, ", params[i]);
+    }
+    printf("\n\n");
+}
+
+template<int D>
 void find_hypothesis_templated(
         int num_buildingblocks,
         int num_combinations,
@@ -399,6 +428,8 @@ void find_hypothesis_templated(
     CUBLAS_CALL(cublasCreate(&handle));
 
     for (int i = 0; i < measurements.height - 1; i++) {
+        printf("\ncross validation iteration %d :)\n", i);
+
         prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
                 device_measurements,
                 num_combinations,
@@ -437,6 +468,14 @@ void find_hypothesis_templated(
         compute_costs<D><<<div_up(num_hypothesis, 512), 512>>>(device_measurements, num_combinations, num_buildingblocks,
                                                                num_hypothesis, cmatrices, rss_costs, smape_costs);
     }
+
+    float rss_costs_host[num_hypothesis];
+    CUDA_CALL(cudaMemcpy(rss_costs_host, rss_costs, num_hypothesis * sizeof(float), cudaMemcpyDeviceToHost))
+
+    float* minimum_rss_cost_elem = std::min_element(rss_costs_host, rss_costs_host + num_hypothesis);
+    int minimum_rss_cost_idx = (int) (minimum_rss_cost_elem - rss_costs_host) / sizeof(float);
+
+    print_hypothesis<D><<<1, 1>>>(minimum_rss_cost_idx, num_combinations, num_buildingblocks, num_hypothesis, device_measurements, cmatrices);
 
     matrix_free_cpu(A);
     matrix_free_cpu(X);
