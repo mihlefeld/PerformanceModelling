@@ -419,7 +419,7 @@ void find_hypothesis_templated(
             CUBLAS_CALL(cublasSgelsBatched(
                     handle,
                     CUBLAS_OP_N,
-                    measurements.height, // height of Aarray
+                    measurements.height - 1, // height of Aarray
                     i + 2, // width of Aarray and height of Carray
                     1, // width of Carray
                     amptrs + (hypothesis_per_combination * start_index), // Aarray pointer
