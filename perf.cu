@@ -265,7 +265,6 @@ __device__ float evaluate_single(unsigned char *combination, float coef, float *
     return nonzero ? prod : 0;
 }
 
-// coefs has to be initialized with all 1s
 // coefs needs to be D + 1 in size
 template<int D>
 __device__ float evaluate_multi(unsigned char *combination, float *coefs, float *ctps, float *params) {
@@ -333,6 +332,15 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
     }
 }
 
+__device__ float smape(float pred, float actual) {
+    float abssum = abs(pred) + abs(actual);
+    return abssum != 0 ? 200 * (abs(pred - actual) / abssum) : 0;
+}
+
+__device__ float rss(float pred, float actual) {
+    return pow(pred - actual, 2);
+}
+
 template<int D>
 __global__ void compute_costs(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
                               float *cmatrices, float *rss_costs, float *smape_costs) {
@@ -344,22 +352,15 @@ __global__ void compute_costs(GPUMatrix measurements, int num_combinations, int 
     unsigned char *combination;
     get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
 
-    float rss_cost = 0;
-    float smape_cost = 0;
-
     // assume the validation measurement is the last row in the matrix
     int i = measurements.height - 1;
     float *row_ptr = get_matrix_element_ptr(measurements, 0, i);
     float actual = row_ptr[D];
     float predicted = evaluate_multi<D>(combination, coefs, ctps, row_ptr);
-    rss_cost = pow(predicted - actual, 2);
-    float abssum = (abs(predicted) + abs(actual));
-    if (abssum != 0)
-        smape_cost = abs(predicted - actual) / (abs(predicted) + abs(actual));
 
     // TODO: don't forget to set all errors to zero before calling the cost functions
-    rss_costs[idx] += rss_cost;
-    smape_costs[idx] += 200 * smape_cost / (measurements.height - 1);
+    rss_costs[idx] += rss(predicted, actual);
+    smape_costs[idx] += smape(predicted, actual) / (measurements.height - 1);
 }
 
 template<int D>
@@ -371,11 +372,19 @@ __global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations,
     unsigned char *combination;
     get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
 
-    float* params = get_matrix_element_ptr(measurements, 0, 0);
-    float predicted = evaluate_multi<D>(combination, coefs, ctps, params);
-    float actual = get_matrix_element(measurements, D, 0);
+    for (int i = 0; i < measurements.height; i++) {
+        float* params = get_matrix_element_ptr(measurements, 0, i);
+        float predicted = evaluate_multi<D>(combination, coefs, ctps, params);
+        float actual = get_matrix_element(measurements, D, i);
+        /*printf("\nParams: ");
+        for(int i = 0; i < D; i++) {
+            printf("%f, ", params[i]);
+        }
+        printf("\nActual: %f\t Predicted: %f", actual, predicted);*/
+        printf("\nSMAPE(%f, %f) = %f", predicted, actual, smape(predicted, actual));
+    }
 
-    printf("predicted value: %f\tactual value: %f\ncoefs:", predicted, actual);
+    printf("\ncoefs: ");
     for(int i = 0; i < D+1; i++) {
         printf("%f, ", coefs[i]);
     }
@@ -383,9 +392,13 @@ __global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations,
     for(int i = 0; i < D; i++) {
         printf("(%f, %f), ", ctps[2*i], ctps[2*i+1]);
     }
-    printf("\nparams: ");
+    printf("\ncombination: \n");
     for(int i = 0; i < D; i++) {
-        printf("%f, ", params[i]);
+        printf("(");
+        for (int j = 0; j < D-1; j++) {
+            printf("%d, ", combination[i*D + j]);
+        }
+        printf("%d)\n", combination[i*D + D - 1]);
     }
     printf("\n\n");
 }
@@ -428,8 +441,6 @@ void find_hypothesis_templated(
     CUBLAS_CALL(cublasCreate(&handle));
 
     for (int i = 0; i < measurements.height - 1; i++) {
-        printf("Leaving out element %d\n", i);
-
         prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
                 device_measurements,
                 num_combinations,
@@ -441,8 +452,6 @@ void find_hypothesis_templated(
                 cmptrs,
                 i
         );
-
-        cudaDeviceSynchronize();
 
         int previous_start_index = 0;
         for (int i = 0; i < D; i++) {
@@ -467,12 +476,8 @@ void find_hypothesis_templated(
             previous_start_index = start_index;
         }
 
-        cudaDeviceSynchronize();
-
         compute_costs<D><<<div_up(num_hypothesis, 512), 512>>>(device_measurements, num_combinations, num_buildingblocks,
                                                                num_hypothesis, cmatrices, rss_costs, smape_costs);
-
-        cudaDeviceSynchronize();
     }
 
     prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
@@ -486,8 +491,6 @@ void find_hypothesis_templated(
             cmptrs,
             measurements.width - 1
     );
-
-    cudaDeviceSynchronize();
 
     int previous_start_index = 0;
     for (int i = 0; i < D; i++) {
@@ -512,27 +515,11 @@ void find_hypothesis_templated(
         previous_start_index = start_index;
     }
 
-    cudaDeviceSynchronize();
-
     int minimum_rss_cost_idx;
     cublasIsamin_v2(handle, num_hypothesis, rss_costs, 1, &minimum_rss_cost_idx);
     minimum_rss_cost_idx -= 1;
     printf("RSS cost index: %d\n", minimum_rss_cost_idx);
-
-    cudaDeviceSynchronize();
-
     print_hypothesis<D><<<1, 1>>>(minimum_rss_cost_idx, num_combinations, num_buildingblocks, num_hypothesis, device_measurements, cmatrices);
-
-    cudaDeviceSynchronize();
-
-    int minimum_smape_cost_idx;
-    cublasIsamin_v2(handle, num_hypothesis, rss_costs, 1, &minimum_smape_cost_idx);
-    minimum_smape_cost_idx -= 1;
-    printf("SMAPE cost index: %d\n", minimum_smape_cost_idx);
-
-    cudaDeviceSynchronize();
-
-    print_hypothesis<D><<<1, 1>>>(minimum_smape_cost_idx, num_combinations, num_buildingblocks, num_hypothesis, device_measurements, cmatrices);
 
     cudaDeviceSynchronize();
 

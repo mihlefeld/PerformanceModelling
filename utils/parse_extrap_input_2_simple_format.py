@@ -15,11 +15,10 @@ def main():
     if argc >= 3:
         sys.stdout = open(sys.argv[2], 'w')
 
-
-    experiment = text_file_reader.read_text_file(sys.argv[1]) # "tests/data/text/three_parameter_1.txt"
-    experiment.measurements # Dict[Tuple[Callpath, Metric], List[Measurement]]
-    #print(len(experiment.callpaths))
-    #print(len(experiment.metrics))
+    experiment = text_file_reader.read_text_file(sys.argv[1])  # "tests/data/text/three_parameter_1.txt"
+    experiment.measurements  # Dict[Tuple[Callpath, Metric], List[Measurement]]
+    # print(len(experiment.callpaths))
+    # print(len(experiment.metrics))
     length = len(experiment.callpaths)
 
     for i in range(length):
@@ -33,10 +32,10 @@ def main():
         for measurement in measurements:
             for x in measurement.coordinate:
                 print(x, end=" ")
-            print(measurement.mean) #, measurement.median, measurement.minimum, measurement.maximum, measurement.std)
+            print(measurement.mean)  # measurement.median, measurement.minimum, measurement.maximum, measurement.std)
 
-    #modeller = DirectMultiParameterModeler()
-    #model = modeller.create_model(experiment.measurements[(Callpath('reg'), Metric('metr'))])
+    # modeller = DirectMultiParameterModeler()
+    # model = modeller.create_model(experiment.measurements[(Callpath('reg'), Metric('metr'))])
 
 
 if __name__ == '__main__':

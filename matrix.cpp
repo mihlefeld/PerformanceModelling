@@ -84,7 +84,7 @@ void matrix_print(const CPUMatrix &m) {
 }
 
 CPUMatrix load_from_file(const std::string& filename) {
-    std::cout << "Openging file '" << filename << "'." << std::endl;
+    std::cout << "Opening file '" << filename << "'." << std::endl;
 
     std::ifstream file;
     file.open(filename);
