@@ -305,7 +305,8 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
     float *cmatrix = &cmatrices[idx * measurements.height];
     amptrs[idx] = amatrix;
     cmptrs[idx] = cmatrix;
-    float ctps[2*D];
+    __shared__ float sctps[512][2*D];
+    float *ctps = sctps[threadIdx.x];
     unsigned char *combination;
 
     get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
@@ -440,7 +441,7 @@ void find_hypothesis_templated(
 
     CUBLAS_CALL(cublasCreate(&handle));
 
-    for (int i = 0; i < measurements.height - 1; i++) {
+    for (int i = 0; i < 4; i++) {
         prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
                 device_measurements,
                 num_combinations,
