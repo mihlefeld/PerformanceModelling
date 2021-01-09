@@ -301,7 +301,6 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
     if(idx >= num_hypothesis)
         return;
 
-    __shared__ float column_cache[512][125];
     float *amatrix = &amatrices[idx * (measurements.height * (D + 1))];
     float *cmatrix = &cmatrices[idx * measurements.height];
     amptrs[idx] = amatrix;
@@ -328,10 +327,7 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
             // this value needs to be written into a giant list of matrices
             float y = evaluate_single<D>(&combination[D*j], 1, ctps, get_matrix_element_ptr(measurements, 0, ii));
             // danger danger, amatrix must be column major format
-            column_cache[threadIdx.x][i] = y;
-        }
-        for(int i = 0; i < measurements.height; i++) {
-            amatrix[(j + 1) * measurements.height + i] = column_cache[threadIdx.x][i];
+            amatrix[(j + 1) * measurements.height + i] = y;
         }
     }
 }
@@ -376,7 +372,6 @@ __global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations,
     unsigned char *combination;
     get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
 
-    float avg_smape = 0;
     for (int i = 0; i < measurements.height; i++) {
         float* params = get_matrix_element_ptr(measurements, 0, i);
         float predicted = evaluate_multi<D>(combination, coefs, ctps, params);
@@ -386,14 +381,8 @@ __global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations,
             printf("%f, ", params[i]);
         }
         printf("\nActual: %f\t Predicted: %f", actual, predicted);*/
-        float cur_smape = smape(predicted, actual);
-        // printf("\nSMAPE(%f, %f) = %f", predicted, actual, cur_smape);
-        avg_smape += cur_smape;
+        printf("\nSMAPE(%f, %f) = %f", predicted, actual, smape(predicted, actual));
     }
-
-    avg_smape /= measurements.height;
-
-    printf("Average smape: %f", avg_smape);
 
     printf("\ncoefs: ");
     for(int i = 0; i < D+1; i++) {
