@@ -428,7 +428,7 @@ void find_hypothesis_templated(
     CUBLAS_CALL(cublasCreate(&handle));
 
     for (int i = 0; i < measurements.height - 1; i++) {
-        printf("\ncross validation iteration %d :)\n", i);
+        printf("Leaving out element %d\n", i);
 
         prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
                 device_measurements,
@@ -441,6 +441,8 @@ void find_hypothesis_templated(
                 cmptrs,
                 i
         );
+
+        cudaDeviceSynchronize();
 
         int previous_start_index = 0;
         for (int i = 0; i < D; i++) {
@@ -465,17 +467,75 @@ void find_hypothesis_templated(
             previous_start_index = start_index;
         }
 
+        cudaDeviceSynchronize();
+
         compute_costs<D><<<div_up(num_hypothesis, 512), 512>>>(device_measurements, num_combinations, num_buildingblocks,
                                                                num_hypothesis, cmatrices, rss_costs, smape_costs);
+
+        cudaDeviceSynchronize();
     }
 
-    float rss_costs_host[num_hypothesis];
-    CUDA_CALL(cudaMemcpy(rss_costs_host, rss_costs, num_hypothesis * sizeof(float), cudaMemcpyDeviceToHost))
+    prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
+            device_measurements,
+            num_combinations,
+            num_buildingblocks,
+            num_hypothesis,
+            amatrices,
+            cmatrices,
+            amptrs,
+            cmptrs,
+            measurements.width - 1
+    );
 
-    float* minimum_rss_cost_elem = std::min_element(rss_costs_host, rss_costs_host + num_hypothesis);
-    int minimum_rss_cost_idx = (int) (minimum_rss_cost_elem - rss_costs_host) / sizeof(float);
+    cudaDeviceSynchronize();
+
+    int previous_start_index = 0;
+    for (int i = 0; i < D; i++) {
+        int start_index = start_indices[i];
+        if (start_index == -1) continue;
+        int combination_count = start_index - previous_start_index + 1;
+        CUBLAS_CALL(cublasSgelsBatched(
+                handle,
+                CUBLAS_OP_N,
+                measurements.height, // height of Aarray
+                i + 2, // width of Aarray and height of Carray
+                1, // width of Carray
+                amptrs + (hypothesis_per_combination * start_index), // Aarray pointer
+                measurements.height, // lda >= max(1,m)
+                cmptrs + (hypothesis_per_combination * start_index), // Carray pointer
+                measurements.height, // ldc >= max(1,m)
+                &info,
+                dev_info_array,
+                combination_count * hypothesis_per_combination
+        )
+        )
+        previous_start_index = start_index;
+    }
+
+    cudaDeviceSynchronize();
+
+    int minimum_rss_cost_idx;
+    cublasIsamin_v2(handle, num_hypothesis, rss_costs, 1, &minimum_rss_cost_idx);
+    minimum_rss_cost_idx -= 1;
+    printf("RSS cost index: %d\n", minimum_rss_cost_idx);
+
+    cudaDeviceSynchronize();
 
     print_hypothesis<D><<<1, 1>>>(minimum_rss_cost_idx, num_combinations, num_buildingblocks, num_hypothesis, device_measurements, cmatrices);
+
+    cudaDeviceSynchronize();
+
+    int minimum_smape_cost_idx;
+    cublasIsamin_v2(handle, num_hypothesis, rss_costs, 1, &minimum_smape_cost_idx);
+    minimum_smape_cost_idx -= 1;
+    printf("SMAPE cost index: %d\n", minimum_smape_cost_idx);
+
+    cudaDeviceSynchronize();
+
+    print_hypothesis<D><<<1, 1>>>(minimum_smape_cost_idx, num_combinations, num_buildingblocks, num_hypothesis, device_measurements, cmatrices);
+
+    cudaDeviceSynchronize();
+
 
     matrix_free_cpu(A);
     matrix_free_cpu(X);
