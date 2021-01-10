@@ -3,7 +3,10 @@ cmake_minimum_required(VERSION 3.1)
 project(PerformanceModelling)
 
 
-link_directories(/usr/local/cuda-11.1/lib64)
+link_directories(
+		/usr/local/cuda-11.1/lib64
+		/usr/local/cuda-10.1/lib64
+)
 
 # Set the default build type
 if(NOT CMAKE_BUILD_TYPE)

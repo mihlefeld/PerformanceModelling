@@ -445,7 +445,7 @@ void find_hypothesis_templated(
 
     CUBLAS_CALL(cublasCreate(&handle));
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < measurements.height - 1; i++) {
         prepare_gels_batched<3><<<div_up(num_hypothesis, block_size), block_size>>>(
                 device_measurements,
                 num_combinations,
