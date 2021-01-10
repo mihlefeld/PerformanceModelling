@@ -11,6 +11,7 @@
 #include "common.h"
 
 __constant__ float building_blocks[] = {
+        0, 0,
         0, 1,
         0, 2,
         1./4, 0,
@@ -62,7 +63,7 @@ __constant__ float building_blocks[] = {
 
 __constant__ unsigned char combinations[256];
 
-int combinations_2d_start_indices[] {
+int combinations_2d_end_indices[] {
     1, 4
 };
 
@@ -83,7 +84,7 @@ unsigned char combinations_2d[] {
 // combination counts: element at index i determines where the combinations
 // with i + 2 columns start if -1, the combinations using that many columns are not present
 
-int combinations_3d_start_indices[] {
+int combinations_3d_end_indices[] {
     1, 11, 23
 };
 
@@ -204,8 +205,8 @@ unsigned char combinations_3d[] {
     0, 0, 1,
 };
 
-int combinations_4d_start_indices[] {
-    0, -1, -1, 1
+int combinations_4d_end_indices[] {
+    1, -1, -1, 2
 };
 
 unsigned char combinations_4d[] {
@@ -220,8 +221,8 @@ unsigned char combinations_4d[] {
     0, 0, 0, 1
 };
 
-int combinations_5d_start_indices[] {
-    0, -1, -1, -1, 1
+int combinations_5d_end_indices[] {
+    1, -1, -1, -1, 2
 };
 
 unsigned char combinations_5d[] {
@@ -545,7 +546,7 @@ void find_hypothesis_templated(
 void find_hypothesis(const CPUMatrix &measurements) {
     cublasHandle_t handle;
     int num_combinations;
-    int num_buildingblocks = 39;
+    int num_buildingblocks = 40;
     int dimensions = measurements.width-1;
     switch(dimensions) {
         case 2:
@@ -554,7 +555,7 @@ void find_hypothesis(const CPUMatrix &measurements) {
                     num_buildingblocks,
                     num_combinations,
                     combinations_2d,
-                    combinations_2d_start_indices,
+                    combinations_2d_end_indices,
                     measurements
             );
             break;
@@ -564,7 +565,7 @@ void find_hypothesis(const CPUMatrix &measurements) {
                     num_buildingblocks,
                     num_combinations,
                     combinations_3d,
-                    combinations_3d_start_indices,
+                    combinations_3d_end_indices,
                     measurements
             );
 
