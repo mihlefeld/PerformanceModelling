@@ -295,7 +295,7 @@ __device__ void get_data_from_indx(int idx, float *ctps, unsigned char **combina
 }
 
 template<int D>
-__global__ void prepare_gels_batched(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
+__global__ void __launch_bounds__(256) prepare_gels_batched(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
                                      float *amatrices, float *cmatrices, float **amptrs, float **cmptrs, int swap_indx) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     if(idx >= num_hypothesis)
@@ -322,13 +322,16 @@ __global__ void prepare_gels_batched(GPUMatrix measurements, int num_combination
         cmatrix[i] = get_matrix_element(measurements, D, ii);
     }
 
+    float column_cache[125];
     for (int j = 0; j < D; j++) {
         for (int i = 0; i < measurements.height; i++) {
             int ii = i == swap_indx ? (measurements.height - 1) : (i == measurements.height - 1 ? swap_indx : i);
             // this value needs to be written into a giant list of matrices
-            float y = evaluate_single<D>(&combination[D*j], 1, ctps, get_matrix_element_ptr(measurements, 0, ii));
+            column_cache[i] = evaluate_single<D>(&combination[D*j], 1, ctps, get_matrix_element_ptr(measurements, 0, ii));
+        }
+        for (int i = 0; i < measurements.height; i++) {
             // danger danger, amatrix must be column major format
-            amatrix[(j + 1) * measurements.height + i] = y;
+            amatrix[(j + 1) * measurements.height + i] = column_cache[i];
         }
     }
 }
@@ -414,6 +417,7 @@ void find_hypothesis_templated(
     )
 {
     cublasHandle_t handle;
+    int block_size = 128;
     int info;
     int num_hypothesis = pow(num_buildingblocks, D) * num_combinations;
     int hypothesis_per_combination = num_hypothesis / num_combinations;
@@ -442,7 +446,7 @@ void find_hypothesis_templated(
     CUBLAS_CALL(cublasCreate(&handle));
 
     for (int i = 0; i < 4; i++) {
-        prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
+        prepare_gels_batched<3><<<div_up(num_hypothesis, block_size), block_size>>>(
                 device_measurements,
                 num_combinations,
                 num_buildingblocks,
@@ -481,7 +485,7 @@ void find_hypothesis_templated(
                                                                num_hypothesis, cmatrices, rss_costs, smape_costs);
     }
 
-    prepare_gels_batched<3><<<div_up(num_hypothesis, 512), 512>>>(
+    prepare_gels_batched<3><<<div_up(num_hypothesis, block_size), block_size>>>(
             device_measurements,
             num_combinations,
             num_buildingblocks,
