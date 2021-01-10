@@ -62,8 +62,8 @@ __constant__ float building_blocks[] = {
 
 __constant__ unsigned char combinations[256];
 
-int combinations_2d_column_counts[] {
-    0, 1
+int combinations_2d_start_indices[] {
+    1, 4
 };
 
 unsigned char combinations_2d[] {
@@ -84,7 +84,7 @@ unsigned char combinations_2d[] {
 // with i + 2 columns start if -1, the combinations using that many columns are not present
 
 int combinations_3d_start_indices[] {
-    0, 1, 11
+    1, 11, 23
 };
 
 unsigned char combinations_3d[] {
@@ -446,7 +446,7 @@ void find_hypothesis_templated(
     CUBLAS_CALL(cublasCreate(&handle));
 
     for (int i = 0; i < measurements.height - 1; i++) {
-        prepare_gels_batched<3><<<div_up(num_hypothesis, block_size), block_size>>>(
+        prepare_gels_batched<D><<<div_up(num_hypothesis, block_size), block_size>>>(
                 device_measurements,
                 num_combinations,
                 num_buildingblocks,
@@ -458,11 +458,11 @@ void find_hypothesis_templated(
                 i
         );
 
-        int previous_start_index = 0;
+        int start_index = 0;
         for (int i = 0; i < D; i++) {
-            int start_index = start_indices[i];
-            if (start_index == -1) continue;
-            int combination_count = start_index - previous_start_index + 1;
+            int end_index = start_indices[i];
+            if (end_index == -1) continue;
+            int combination_count = end_index - start_index;
             CUBLAS_CALL(cublasSgelsBatched(
                     handle,
                     CUBLAS_OP_N,
@@ -478,14 +478,15 @@ void find_hypothesis_templated(
                     combination_count * hypothesis_per_combination
                 )
             )
-            previous_start_index = start_index;
+            start_index = end_index;
         }
 
         compute_costs<D><<<div_up(num_hypothesis, 512), 512>>>(device_measurements, num_combinations, num_buildingblocks,
                                                                num_hypothesis, cmatrices, rss_costs, smape_costs);
+        cudaDeviceSynchronize();
     }
 
-    prepare_gels_batched<3><<<div_up(num_hypothesis, block_size), block_size>>>(
+    prepare_gels_batched<D><<<div_up(num_hypothesis, block_size), block_size>>>(
             device_measurements,
             num_combinations,
             num_buildingblocks,
@@ -497,11 +498,11 @@ void find_hypothesis_templated(
             measurements.width - 1
     );
 
-    int previous_start_index = 0;
+    int start_index = 0;
     for (int i = 0; i < D; i++) {
-        int start_index = start_indices[i];
-        if (start_index == -1) continue;
-        int combination_count = start_index - previous_start_index + 1;
+        int end_index = start_indices[i];
+        if (end_index == -1) continue;
+        int combination_count = end_index - start_index;
         CUBLAS_CALL(cublasSgelsBatched(
                 handle,
                 CUBLAS_OP_N,
@@ -515,19 +516,18 @@ void find_hypothesis_templated(
                 &info,
                 dev_info_array,
                 combination_count * hypothesis_per_combination
+            )
         )
-        )
-        previous_start_index = start_index;
+        start_index = end_index;
     }
 
     int minimum_rss_cost_idx;
-    cublasIsamin_v2(handle, num_hypothesis, rss_costs, 1, &minimum_rss_cost_idx);
+    CUBLAS_CALL(cublasIsamin_v2(handle, num_hypothesis, rss_costs, 1, &minimum_rss_cost_idx));
     minimum_rss_cost_idx -= 1;
     printf("RSS cost index: %d\n", minimum_rss_cost_idx);
     print_hypothesis<D><<<1, 1>>>(minimum_rss_cost_idx, num_combinations, num_buildingblocks, num_hypothesis, device_measurements, cmatrices);
 
-    cudaDeviceSynchronize();
-
+    CUDA_CALL(cudaDeviceSynchronize());
 
     matrix_free_cpu(A);
     matrix_free_cpu(X);
@@ -549,7 +549,14 @@ void find_hypothesis(const CPUMatrix &measurements) {
     int dimensions = measurements.width-1;
     switch(dimensions) {
         case 2:
-
+            num_combinations = 4;
+            find_hypothesis_templated<2>(
+                    num_buildingblocks,
+                    num_combinations,
+                    combinations_2d,
+                    combinations_2d_start_indices,
+                    measurements
+            );
             break;
         case 3:
             num_combinations = 23;
