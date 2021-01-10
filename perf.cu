@@ -253,21 +253,21 @@ __device__ void set_matrix_element(GPUMatrix m, int x, int y, float v) {
 }
 
 template<int D>
-__device__ float evaluate_single(unsigned char *combination, float coef, float ctps[2*D][128], float *params) {
+__device__ float evaluate_single(unsigned char *combination, float coef, float *ctps, float *params) {
     float prod = coef;
     // if the combination is 0 0 0, zero should be returned, instead of prod
     bool nonzero = 0;
     for (int i = 0; i < D; i++) {
         nonzero |= combination[i];
         if (combination[i])
-            prod *= pow(params[i], ctps[i*2][threadIdx.x]) * pow(log2(params[i]), ctps[i*2 + 1][threadIdx.x]);
+            prod *= pow(params[i], ctps[i*2]) * pow(log2(params[i]), ctps[i*2 + 1]);
     }
     return nonzero ? prod : 0;
 }
 
 // coefs needs to be D + 1 in size
 template<int D>
-__device__ float evaluate_multi(unsigned char *combination, float *coefs, float ctps[2*D][128], float *params) {
+__device__ float evaluate_multi(unsigned char *combination, float *coefs, float *ctps, float *params) {
     float result = coefs[0];
     for (int i = 0; i < D; i++) {
         result += evaluate_single<D>(&combination[i*D], coefs[i + 1], ctps, params);;
@@ -276,7 +276,7 @@ __device__ float evaluate_multi(unsigned char *combination, float *coefs, float 
 }
 
 template<int D>
-__device__ void get_data_from_indx(int idx, float ctps[2*D][128], unsigned char **combination,
+__device__ void get_data_from_indx(int idx, float *ctps, unsigned char **combination,
                                    int num_combinations, int num_buildingblocks, int num_hypothesis) {
     int div_ci = num_hypothesis / num_combinations;
     int combination_index = idx / div_ci;
@@ -288,14 +288,14 @@ __device__ void get_data_from_indx(int idx, float ctps[2*D][128], unsigned char 
         int ctpi = mod_idx / r;
         mod_idx = mod_idx % r;
         for (int j = 0; j < 2; j++) {
-            ctps[i * 2 + j][threadIdx.x] = building_blocks[ctpi * 2 + j];
+            ctps[i * 2 + j] = building_blocks[ctpi * 2 + j];
         }
         r/= num_buildingblocks;
     }
 }
 
 template<int D>
-__global__ void __launch_bounds__(128) prepare_gels_batched(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
+__global__ void __launch_bounds__(256) prepare_gels_batched(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
                                      float *amatrices, float *cmatrices, float **amptrs, float **cmptrs, int swap_indx) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     if(idx >= num_hypothesis)
@@ -305,10 +305,11 @@ __global__ void __launch_bounds__(128) prepare_gels_batched(GPUMatrix measuremen
     float *cmatrix = &cmatrices[idx * measurements.height];
     amptrs[idx] = amatrix;
     cmptrs[idx] = cmatrix;
-    __shared__ float sctps[2*D][128];
+    __shared__ float sctps[512][2*D];
+    float *ctps = sctps[threadIdx.x];
     unsigned char *combination;
 
-    get_data_from_indx<D>(idx, sctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
+    get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
 
     for (int i = 0; i < measurements.height; i++) {
         // first element in every row should be 1, since there's always a constant component
@@ -326,7 +327,7 @@ __global__ void __launch_bounds__(128) prepare_gels_batched(GPUMatrix measuremen
         for (int i = 0; i < measurements.height; i++) {
             int ii = i == swap_indx ? (measurements.height - 1) : (i == measurements.height - 1 ? swap_indx : i);
             // this value needs to be written into a giant list of matrices
-            column_cache[i] = evaluate_single<D>(&combination[D*j], 1.0f, sctps, get_matrix_element_ptr(measurements, 0, ii));
+            column_cache[i] = evaluate_single<D>(&combination[D*j], 1, ctps, get_matrix_element_ptr(measurements, 0, ii));
         }
         for (int i = 0; i < measurements.height; i++) {
             // danger danger, amatrix must be column major format
@@ -350,16 +351,16 @@ __global__ void compute_costs(GPUMatrix measurements, int num_combinations, int 
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     if(idx >= num_hypothesis)
         return;
-    __shared__ float sctps[2*D][128];
+    float ctps[2*D];
     float *coefs = &cmatrices[idx * measurements.height];
     unsigned char *combination;
-    get_data_from_indx<D>(idx, sctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
+    get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
 
     // assume the validation measurement is the last row in the matrix
     int i = measurements.height - 1;
     float *row_ptr = get_matrix_element_ptr(measurements, 0, i);
     float actual = row_ptr[D];
-    float predicted = evaluate_multi<D>(combination, coefs, sctps, row_ptr);
+    float predicted = evaluate_multi<D>(combination, coefs, ctps, row_ptr);
 
     // TODO: don't forget to set all errors to zero before calling the cost functions
     rss_costs[idx] += rss(predicted, actual);
@@ -370,14 +371,14 @@ template<int D>
 __global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations, int num_buildingblocks, int num_hypothesis, GPUMatrix measurements, float* cmatrices) {
     int idx = minimum_rss_cost_idx;
 
-    __shared__ float sctps[2*D][128];
+    float ctps[2*D];
     float *coefs = &cmatrices[idx * measurements.height];
     unsigned char *combination;
-    get_data_from_indx<D>(idx, sctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
+    get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
 
     for (int i = 0; i < measurements.height; i++) {
         float* params = get_matrix_element_ptr(measurements, 0, i);
-        float predicted = evaluate_multi<D>(combination, coefs, sctps, params);
+        float predicted = evaluate_multi<D>(combination, coefs, ctps, params);
         float actual = get_matrix_element(measurements, D, i);
         /*printf("\nParams: ");
         for(int i = 0; i < D; i++) {
@@ -393,7 +394,7 @@ __global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations,
     }
     printf("\nctps: ");
     for(int i = 0; i < D; i++) {
-        printf("(%f, %f), ", sctps[2*i][threadIdx.x], sctps[2*i+1][threadIdx.x]);
+        printf("(%f, %f), ", ctps[2*i], ctps[2*i+1]);
     }
     printf("\ncombination: \n");
     for(int i = 0; i < D; i++) {
@@ -480,7 +481,7 @@ void find_hypothesis_templated(
             previous_start_index = start_index;
         }
 
-        compute_costs<D><<<div_up(num_hypothesis, block_size), block_size>>>(device_measurements, num_combinations, num_buildingblocks,
+        compute_costs<D><<<div_up(num_hypothesis, 512), 512>>>(device_measurements, num_combinations, num_buildingblocks,
                                                                num_hypothesis, cmatrices, rss_costs, smape_costs);
     }
 
