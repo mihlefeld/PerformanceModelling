@@ -6,6 +6,7 @@ project(PerformanceModelling)
 link_directories(
 		/usr/local/cuda-11.1/lib64
 		/usr/local/cuda-10.1/lib64
+		/usr/local/cuda-10.0/lib64
 )
 
 # Set the default build type
