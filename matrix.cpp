@@ -61,16 +61,6 @@ void matrix_download(const GPUMatrix &src, CPUMatrix &dst)
     )
 }
 
-void matrix_compare_cpu(const CPUMatrix &a, const CPUMatrix &b)
-{
-    for (int y = 0; y < a.height; y++) {
-        for (int x = 0; x < a.width; x++) {
-            std::cout << std::abs(a.elements[y * a.width + x] - b.elements[y * b.width + x]) << " ";
-        }
-        std::cout << std::endl;
-    }
-}
-
 void matrix_print(const CPUMatrix &m) {
     std::cout << "[" << std::endl;
     for (int y = 0; y < m.height; y++) {

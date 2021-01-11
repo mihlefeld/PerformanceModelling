@@ -18,8 +18,6 @@ struct GPUMatrix {
 CPUMatrix matrix_alloc_cpu(int width, int height);
 void matrix_free_cpu(CPUMatrix &m);
 
-void matrix_compare_cpu(const CPUMatrix &a, const CPUMatrix &b);
-
 GPUMatrix matrix_alloc_gpu(int width, int height);
 void matrix_free_gpu(GPUMatrix &m);
 
