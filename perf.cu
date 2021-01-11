@@ -375,23 +375,6 @@ __global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations,
     unsigned char *combination;
     get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
 
-    float average_smape = 0;
-    for (int i = 0; i < measurements.height; i++) {
-        float* params = get_matrix_element_ptr(measurements, 0, i);
-        float predicted = evaluate_multi<D>(combination, coefs, ctps, params);
-        float actual = get_matrix_element(measurements, D, i);
-        /*printf("\nParams: ");
-        for(int i = 0; i < D; i++) {
-            printf("%f, ", params[i]);
-        }
-        printf("\nActual: %f\t Predicted: %f", actual, predicted);*/
-        float cur_smape = smape(predicted, actual);
-        average_smape += cur_smape;
-        printf("\nSMAPE(%f, %f) = %f", predicted, actual, cur_smape);
-    }
-
-    average_smape /= measurements.height;
-
     printf("\ncoefs: ");
     for(int i = 0; i < D+1; i++) {
         printf("%f, ", coefs[i]);
@@ -409,7 +392,6 @@ __global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations,
         printf("%d)\n", combination[i*D + D - 1]);
     }
     printf("Cross Validation SMAPE: %f\n", smape_costs[idx]);
-    printf("Final Validation SMAPE: %f\n", average_smape);
     printf("\n\n");
 }
 
@@ -418,7 +400,7 @@ void find_hypothesis_templated(
         int num_buildingblocks,
         int num_combinations,
         unsigned char *combinations_array,
-        int *start_indices,
+        int *end_indices,
         const CPUMatrix &measurements
     )
 {
@@ -465,15 +447,15 @@ void find_hypothesis_templated(
         );
 
         int start_index = 0;
-        for (int i = 0; i < D; i++) {
-            int end_index = start_indices[i];
+        for (int j = 0; j < D; j++) {
+            int end_index = end_indices[j];
             if (end_index == -1) continue;
             int combination_count = end_index - start_index;
             CUBLAS_CALL(cublasSgelsBatched(
                     handle,
                     CUBLAS_OP_N,
                     measurements.height - 1, // height of Aarray
-                    i + 2, // width of Aarray and height of Carray
+                    j + 2, // width of Aarray and height of Carray
                     1, // width of Carray
                     amptrs + (hypothesis_per_combination * start_index), // Aarray pointer
                     measurements.height, // lda >= max(1,m)
@@ -506,7 +488,7 @@ void find_hypothesis_templated(
 
     int start_index = 0;
     for (int i = 0; i < D; i++) {
-        int end_index = start_indices[i];
+        int end_index = end_indices[i];
         if (end_index == -1) continue;
         int combination_count = end_index - start_index;
         CUBLAS_CALL(cublasSgelsBatched(
@@ -530,7 +512,7 @@ void find_hypothesis_templated(
     int minimum_smape_cost;
     CUBLAS_CALL(cublasIsamin_v2(handle, num_hypothesis, smape_costs, 1, &minimum_smape_cost));
     minimum_smape_cost -= 1;
-    printf("RSS cost index: %d\n", minimum_smape_cost);
+    printf("SMAPE cost index: %d\n", minimum_smape_cost);
     print_hypothesis<D><<<1, 1>>>(minimum_smape_cost, num_combinations, num_buildingblocks, num_hypothesis, device_measurements, cmatrices, smape_costs);
 
     CUDA_CALL(cudaDeviceSynchronize());
