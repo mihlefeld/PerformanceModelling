@@ -46,11 +46,6 @@ __constant__ float building_blocks[] = {
         2, 1,
         2, 2,
         9./4, 0,
-        7./4, 0,
-        2, 0,
-        2, 1,
-        2, 2,
-        9./4, 0,
         7./3, 0,
         5./2, 0,
         5./2, 1,
@@ -369,7 +364,7 @@ __global__ void compute_costs(GPUMatrix measurements, int num_combinations, int 
 }
 
 template<int D>
-__global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations, int num_buildingblocks, int num_hypothesis, GPUMatrix measurements, float* cmatrices) {
+__global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations, int num_buildingblocks, int num_hypothesis, GPUMatrix measurements, float* cmatrices, float *smape_costs) {
     int idx = minimum_rss_cost_idx;
 
     float ctps[2*D];
@@ -405,6 +400,7 @@ __global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations,
         }
         printf("%d)\n", combination[i*D + D - 1]);
     }
+    printf("Evaluation smape cost: %f", smape_costs[idx]);
     printf("\n\n");
 }
 
@@ -526,7 +522,7 @@ void find_hypothesis_templated(
     CUBLAS_CALL(cublasIsamin_v2(handle, num_hypothesis, rss_costs, 1, &minimum_rss_cost_idx));
     minimum_rss_cost_idx -= 1;
     printf("RSS cost index: %d\n", minimum_rss_cost_idx);
-    print_hypothesis<D><<<1, 1>>>(minimum_rss_cost_idx, num_combinations, num_buildingblocks, num_hypothesis, device_measurements, cmatrices);
+    print_hypothesis<D><<<1, 1>>>(minimum_rss_cost_idx, num_combinations, num_buildingblocks, num_hypothesis, device_measurements, cmatrices, smape_costs);
 
     CUDA_CALL(cudaDeviceSynchronize());
 
@@ -546,7 +542,7 @@ void find_hypothesis_templated(
 void find_hypothesis(const CPUMatrix &measurements) {
     cublasHandle_t handle;
     int num_combinations;
-    int num_buildingblocks = 40;
+    int num_buildingblocks = 43;
     int dimensions = measurements.width-1;
     switch(dimensions) {
         case 2:
