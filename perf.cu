@@ -8,228 +8,249 @@
 #include "perf.h"
 #include "common.h"
 
+// Device list of all possible exponents i and j, 2 wide and num_building_blocks high, stored row major
 __constant__ float building_blocks[] = {
-        0, 0,
-        0, 1,
-        0, 2,
-        1./4, 0,
-        1./3, 0,
-        1./4, 1,
-        1./3, 1,
-        1./4, 2,
-        1./3, 2,
-        1./2, 0,
-        1./2, 1,
-        1./2, 2,
-        2./3, 0,
-        3./4, 0,
-        2./3, 1,
-        3./4, 1,
-        4./5, 0,
-        2./3, 2,
-        3./4, 2,
-        1, 0,
-        1, 1,
-        1, 2,
-        5./4, 0,
-        5./4, 1,
-        4./3, 0,
-        4./3, 1,
-        3./2, 0,
-        3./2, 1,
-        3./2, 2,
-        5./3, 0,
-        7./4, 0,
-        2, 0,
-        2, 1,
-        2, 2,
-        9./4, 0,
-        7./3, 0,
-        5./2, 0,
-        5./2, 1,
-        5./2, 2,
-        8./3, 0,
-        11./4, 0,
-        3, 0,
-        3, 1
+    0, 0,
+    0, 1,
+    0, 2,
+    1./4, 0,
+    1./3, 0,
+    1./4, 1,
+    1./3, 1,
+    1./4, 2,
+    1./3, 2,
+    1./2, 0,
+    1./2, 1,
+    1./2, 2,
+    2./3, 0,
+    3./4, 0,
+    2./3, 1,
+    3./4, 1,
+    4./5, 0,
+    2./3, 2,
+    3./4, 2,
+    1, 0,
+    1, 1,
+    1, 2,
+    5./4, 0,
+    5./4, 1,
+    4./3, 0,
+    4./3, 1,
+    3./2, 0,
+    3./2, 1,
+    3./2, 2,
+    5./3, 0,
+    7./4, 0,
+    2, 0,
+    2, 1,
+    2, 2,
+    9./4, 0,
+    7./3, 0,
+    5./2, 0,
+    5./2, 1,
+    5./2, 2,
+    8./3, 0,
+    11./4, 0,
+    3, 0,
+    3, 1
 };
 
+/*
+ * Device list of all possible combinations
+ * combinations are D*D large and represent how the terms should be added and multiplied together
+ * they are stored in row major format and for every row the spot in the row indicates which term it represents
+ * when the element is 1 it is present as part of the multiplicative row, if the whole row is 0, then the result
+ * will be 0. All D rows get added together, this allows us to represent all possible combinations.
+ * Over every hard-coded combination the add/multiply meaning is written as a comment.
+ */
 __constant__ unsigned char combinations[256];
 
+/*
+ * The end_indices group the combinations by the number of 0 rows. This is needed because cublasSgelsBatched
+ * can only solve systems with a matrix A of full rank, when a 0 row is present, the resulting A matrix has as many
+ * 0 columns as 0 rows in the combination. So we need to seperate these possibilities.
+ * The end index is always the first index that is no longer part of the group.
+ */
 int combinations_2d_end_indices[] {
-        1, 4
+    1, 4
 };
 
 unsigned char combinations_2d[] {
-        1, 1,
-        0, 0,
+    // 1c: a*b
+    1, 1,
+    0, 0,
 
-        0, 1,
-        1, 0,
+    // 2c: a + b
+    0, 1,
+    1, 0,
 
-        1, 1,
-        1, 0,
+    // 2c: a*b + a
+    1, 1,
+    1, 0,
 
-        1, 1,
-        0, 1
+    // 3c: a*b + b
+    1, 1,
+    0, 1
 };
 
-// combination counts: element at index i determines where the combinations
-// with i + 2 columns start if -1, the combinations using that many columns are not present
-
 int combinations_3d_end_indices[] {
-        1, 11, 23
+    1, 11, 23
 };
 
 unsigned char combinations_3d[] {
-        // 1c: x*y*z
-        1, 1, 1,
-        0, 0, 0,
-        0, 0, 0,
+    // 1c: x*y*z
+    1, 1, 1,
+    0, 0, 0,
+    0, 0, 0,
 
-        // 2c: x*y*z + x
-        1, 1, 1,
-        1, 0, 0,
-        0, 0, 0,
+    // 2c: x*y*z + x
+    1, 1, 1,
+    1, 0, 0,
+    0, 0, 0,
 
-        // 2c: x*y*z + y
-        1, 1, 1,
-        0, 1, 0,
-        0, 0, 0,
+    // 2c: x*y*z + y
+    1, 1, 1,
+    0, 1, 0,
+    0, 0, 0,
 
-        // 2c: x*y*z + z
-        1, 1, 1,
-        0, 0, 1,
-        0, 0, 0,
+    // 2c: x*y*z + z
+    1, 1, 1,
+    0, 0, 1,
+    0, 0, 0,
 
-        // 2c: x*y*z + x*y
-        1, 1, 1,
-        1, 1, 0,
-        0, 0, 0,
+    // 2c: x*y*z + x*y
+    1, 1, 1,
+    1, 1, 0,
+    0, 0, 0,
 
-        // 2c: x*y*z + y*z
-        1, 1, 1,
-        0, 1, 1,
-        0, 0, 0,
+    // 2c: x*y*z + y*z
+    1, 1, 1,
+    0, 1, 1,
+    0, 0, 0,
 
-        // 2c: x*y*z + x*z
-        1, 1, 1,
-        1, 0, 1,
-        0, 0, 0,
+    // 2c: x*y*z + x*z
+    1, 1, 1,
+    1, 0, 1,
+    0, 0, 0,
 
-        // 2c: x*y + z
-        1, 1, 0,
-        0, 0, 1,
-        0, 0, 0,
+    // 2c: x*y + z
+    1, 1, 0,
+    0, 0, 1,
+    0, 0, 0,
 
-        // 2c: x*z + y
-        1, 0, 1,
-        0, 1, 0,
-        0, 0, 0,
+    // 2c: x*z + y
+    1, 0, 1,
+    0, 1, 0,
+    0, 0, 0,
 
-        // 2c: x*z + x
-        0, 1, 1,
-        1, 0, 0,
-        0, 0, 0,
+    // 2c: x*z + x
+    0, 1, 1,
+    1, 0, 0,
+    0, 0, 0,
 
-        // 2c: y*z + x
-        0, 1, 1,
-        1, 0, 0,
-        0, 0, 0,
+    // 2c: y*z + x
+    0, 1, 1,
+    1, 0, 0,
+    0, 0, 0,
 
-        // 3c: x+y+z
-        1, 0, 0,
-        0, 1, 0,
-        0, 0, 1,
+    // 3c: x+y+z
+    1, 0, 0,
+    0, 1, 0,
+    0, 0, 1,
 
-        // 3c: x*y*z + x*y + z
-        1, 1, 1,
-        1, 1, 0,
-        0, 0, 1,
+    // 3c: x*y*z + x*y + z
+    1, 1, 1,
+    1, 1, 0,
+    0, 0, 1,
 
-        // 3c: x*y*z + y*z + x
-        1, 1, 1,
-        0, 1, 1,
-        1, 0, 0,
+    // 3c: x*y*z + y*z + x
+    1, 1, 1,
+    0, 1, 1,
+    1, 0, 0,
 
-        // 3c: x*y*z + x*z + y
-        1, 1, 1,
-        1, 0, 1,
-        0, 1, 0,
+    // 3c: x*y*z + x*z + y
+    1, 1, 1,
+    1, 0, 1,
+    0, 1, 0,
 
-        // 3c: x*y*z + x + y
-        1, 1, 1,
-        1, 0, 0,
-        0, 1, 0,
+    // 3c: x*y*z + x + y
+    1, 1, 1,
+    1, 0, 0,
+    0, 1, 0,
 
-        // 3c: x*y*z + x + z
-        1, 1, 1,
-        1, 0, 0,
-        0, 0, 1,
+    // 3c: x*y*z + x + z
+    1, 1, 1,
+    1, 0, 0,
+    0, 0, 1,
 
-        // 3c: x*y*z + y + z
-        1, 1, 1,
-        0, 1, 0,
-        0, 0, 1,
+    // 3c: x*y*z + y + z
+    1, 1, 1,
+    0, 1, 0,
+    0, 0, 1,
 
-        // 3c: x*y + z + y
-        1, 1, 0,
-        0, 0, 1,
-        0, 1, 0,
+    // 3c: x*y + z + y
+    1, 1, 0,
+    0, 0, 1,
+    0, 1, 0,
 
-        // 3c: x*y + z + x
-        1, 1, 0,
-        0, 0, 1,
-        1, 0, 0,
+    // 3c: x*y + z + x
+    1, 1, 0,
+    0, 0, 1,
+    1, 0, 0,
 
-        // 3c: x*z + y + x
-        1, 0, 1,
-        0, 1, 0,
-        1, 0, 0,
+    // 3c: x*z + y + x
+    1, 0, 1,
+    0, 1, 0,
+    1, 0, 0,
 
-        // 3c: y*z + x + y
-        0, 1, 1,
-        1, 0, 0,
-        0, 1, 0,
+    // 3c: y*z + x + y
+    0, 1, 1,
+    1, 0, 0,
+    0, 1, 0,
 
-        // 3c: y*z + x + z
-        0, 1, 1,
-        1, 0, 0,
-        0, 0, 1,
+    // 3c: y*z + x + z
+    0, 1, 1,
+    1, 0, 0,
+    0, 0, 1,
 };
 
+// -1 indicates, that there are no combinations with that many 0 rows
 int combinations_4d_end_indices[] {
-        1, -1, -1, 2
+    1, -1, -1, 2
 };
 
 unsigned char combinations_4d[] {
-        1, 1, 1, 1,
-        0, 0, 0, 0,
-        0, 0, 0, 0,
-        0, 0, 0, 0,
+    // 1c: a*b*c*d
+    1, 1, 1, 1,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
 
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1
+    // 4c: a + b + c + d
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 1, 0,
+    0, 0, 0, 1
 };
 
 int combinations_5d_end_indices[] {
-        1, -1, -1, -1, 2
+    1, -1, -1, -1, 2
 };
 
 unsigned char combinations_5d[] {
-        1, 1, 1, 1, 1,
-        0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0,
+    // 1c: a*b*c*d*e
+    1, 1, 1, 1, 1,
+    0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0,
 
-        1, 0, 0, 0, 0,
-        0, 1, 0, 0, 0,
-        0, 0, 1, 0, 0,
-        0, 0, 0, 1, 0,
-        0, 0, 0, 0, 1
+    // 5c: a + b + c + d + e
+    1, 0, 0, 0, 0,
+    0, 1, 0, 0, 0,
+    0, 0, 1, 0, 0,
+    0, 0, 0, 1, 0,
+    0, 0, 0, 0, 1
 };
 
 __device__ float* get_matrix_element_ptr(GPUMatrix m, int x, int y) {
@@ -245,7 +266,7 @@ template<int D>
 __device__ float evaluate_single(unsigned char *combination, float coef, float *ctps, float *params) {
     float prod = coef;
     // if the combination is 0 0 0, zero should be returned, instead of prod
-    bool nonzero = 0;
+    bool nonzero = false;
     for (int i = 0; i < D; i++) {
         nonzero |= combination[i];
         if (combination[i])
@@ -254,7 +275,6 @@ __device__ float evaluate_single(unsigned char *combination, float coef, float *
     return nonzero ? prod : 0;
 }
 
-// coefs needs to be D + 1 in size
 template<int D>
 __device__ float evaluate_multi(unsigned char *combination, float *coefs, float *ctps, float *params) {
     float result = coefs[0];
@@ -314,11 +334,9 @@ __global__ void __launch_bounds__(256) prepare_gels_batched(GPUMatrix measuremen
     for (int j = 0; j < D; j++) {
         for (int i = 0; i < measurements.height; i++) {
             int ii = i == swap_indx ? (measurements.height - 1) : (i == measurements.height - 1 ? swap_indx : i);
-            // this value needs to be written into a giant list of matrices
             column_cache[i] = evaluate_single<D>(&combination[D*j], 1, ctps, get_matrix_element_ptr(measurements, 0, ii));
         }
         for (int i = 0; i < measurements.height; i++) {
-            // danger danger, amatrix must be column major format
             A[(j + 1) * measurements.height + i] = column_cache[i];
         }
     }
