@@ -26,6 +26,27 @@ struct CublasStuff {
     int lda;
 };
 
+
+struct GPUHypothesis {
+    int d;
+    float *coefficients;
+    float *exponents;
+    float *smape;
+    float *rss;
+    unsigned char *combination;
+};
+
+struct CPUHypothesis {
+    int d;
+    float *coefficients;
+    float *exponents;
+    float smape;
+    float rss;
+    unsigned char *combination;
+    void download(GPUHypothesis g_hypo);
+    void print();
+};
+
 template<int D>
 void find_hypothesis_templated(
         Counts counts,
@@ -42,7 +63,12 @@ void solve(CublasStuff cbstuff, Counts counts, Matrices mats, const int *end_ind
 CublasStuff create_cublas_stuff(int lda);
 Matrices create_matrices(Counts counts, CPUMatrix measurements, int D);
 Costs create_costs(Counts counts);
+GPUHypothesis create_gpu_hypothesis(int d);
+CPUHypothesis create_cpu_hypothesis(int d);
 
 void destroy_cublas_stuff(CublasStuff cbstuff);
 void destroy_matrices(Matrices mats);
 void destroy_costs(Costs costs);
+
+void destroy_gpu_hypothesis(GPUHypothesis g_hypo);
+void destroy_cpu_hypothseis(CPUHypothesis c_hypo);

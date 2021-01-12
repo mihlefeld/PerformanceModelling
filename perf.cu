@@ -329,8 +329,8 @@ __global__ void __launch_bounds__(256) prepare_gels_batched(GPUMatrix measuremen
         C[i] = get_matrix_element(measurements, D, ii);
     }
 
-    // TODO: this needs to be adapted to write 128 values at a time to allow for larger measurements matrices
-    float column_cache[125];
+    // TODO: alternative kernel for more than 500 measurements
+    float column_cache[500];
     for (int j = 0; j < D; j++) {
         for (int i = 0; i < measurements.height; i++) {
             int ii = i == swap_indx ? (measurements.height - 1) : (i == measurements.height - 1 ? swap_indx : i);
@@ -373,33 +373,19 @@ __global__ void compute_costs(GPUMatrix measurements, Counts counts,
     costs.smape[idx] += smape(predicted, actual) / (measurements.height - 1);
 }
 
-template<int D>
-__global__ void print_hypothesis(int minimum_rss_cost_idx, Counts counts, GPUMatrix measurements, Matrices mats, Costs costs) {
-    int idx = minimum_rss_cost_idx;
-
-    float ctps[2*D];
+template <int D>
+__global__ void save_hypothesis(GPUHypothesis g_hypo, int idx, Counts counts, GPUMatrix measurements, Matrices mats, Costs costs) {
     float *coefs = &mats.C[idx * measurements.height];
     unsigned char *combination;
-    get_data_from_indx<D>(idx, ctps, &combination, counts);
-
-    printf("\ncoefs: ");
-    for(int i = 0; i < D+1; i++) {
-        printf("%f, ", coefs[i]);
+    get_data_from_indx<D>(idx, g_hypo.exponents, &combination, counts);
+    *g_hypo.smape = costs.smape[idx];
+    *g_hypo.rss = costs.rss[idx];
+    for (int i = 0; i < D*D; i++) {
+        g_hypo.combination[i] = combination[i];
     }
-    printf("\nctps: ");
-    for(int i = 0; i < D; i++) {
-        printf("(%f, %f), ", ctps[2*i], ctps[2*i+1]);
+    for (int i = 0; i < D + 1; i++) {
+        g_hypo.coefficients[i] = coefs[i];
     }
-    printf("\ncombination: \n");
-    for(int i = 0; i < D; i++) {
-        printf("(");
-        for (int j = 0; j < D-1; j++) {
-            printf("%d, ", combination[i*D + j]);
-        }
-        printf("%d)\n", combination[i*D + D - 1]);
-    }
-    printf("Cross Validation SMAPE: %f\n", costs.smape[idx]);
-    printf("\n\n");
 }
 
 template<int D>
@@ -459,16 +445,22 @@ void find_hypothesis_templated(
 
     solve<D>(cbstuff, counts, mats, end_indices, measurements.height);
 
-    int minimum_smape_cost;
-    CUBLAS_CALL(cublasIsamin_v2(cbstuff.handle, counts.hypotheses, costs.smape, 1, &minimum_smape_cost));
-    minimum_smape_cost -= 1;
-    print_hypothesis<D><<<1, 1>>>(minimum_smape_cost, counts, d_measurements, mats, costs);
+    int min_cost_idx;
+    CUBLAS_CALL(cublasIsamin_v2(cbstuff.handle, counts.hypotheses, costs.smape, 1, &min_cost_idx));
+    min_cost_idx -= 1;
+    GPUHypothesis g_hypo = create_gpu_hypothesis(D);
+    CPUHypothesis c_hypo = create_cpu_hypothesis(D);
+    save_hypothesis<D><<<1, 1>>>(g_hypo, min_cost_idx, counts, d_measurements, mats, costs);
+    c_hypo.download(g_hypo);
+    c_hypo.print();
 
     CUDA_CALL(cudaDeviceSynchronize());
 
     destroy_costs(costs);
     destroy_matrices(mats);
     destroy_cublas_stuff(cbstuff);
+    destroy_gpu_hypothesis(g_hypo);
+    destroy_cpu_hypothseis(c_hypo);
     matrix_free_gpu(d_measurements);
 }
 
@@ -553,7 +545,68 @@ void destroy_costs(Costs costs) {
     CUDA_CALL(cudaFree(costs.smape))
 }
 
+GPUHypothesis create_gpu_hypothesis(int d) {
+    GPUHypothesis hypo{};
+    hypo.d = d;
+    CUDA_CALL(cudaMalloc(&hypo.combination, d * d))
+    CUDA_CALL(cudaMalloc(&hypo.coefficients, (d + 1) * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&hypo.exponents, 2 * d * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&hypo.smape, sizeof(float)))
+    CUDA_CALL(cudaMalloc(&hypo.rss, sizeof(float)))
+    return hypo;
+}
+
+CPUHypothesis create_cpu_hypothesis(int d) {
+    CPUHypothesis hypo{};
+    hypo.d = d;
+    hypo.combination = new unsigned char[d * d];
+    hypo.coefficients = new float[d + 1];
+    hypo.exponents = new float[2 * d];
+    return hypo;
+}
+
+void destroy_gpu_hypothesis(GPUHypothesis g_hypo) {
+    CUDA_CALL(cudaFree(g_hypo.combination))
+    CUDA_CALL(cudaFree(g_hypo.coefficients))
+    CUDA_CALL(cudaFree(g_hypo.exponents))
+    CUDA_CALL(cudaFree(g_hypo.smape))
+    CUDA_CALL(cudaFree(g_hypo.rss))
+}
+
+void destroy_cpu_hypothseis(CPUHypothesis c_hypo) {
+    delete [] c_hypo.combination;
+    delete [] c_hypo.coefficients;
+    delete [] c_hypo.exponents;
+}
+
 Counts::Counts(int dim, int building_blocks, int combinations): building_blocks(building_blocks), combinations(combinations){
     hpc = pow(building_blocks, dim);
     hypotheses = combinations * hpc;
+}
+
+void CPUHypothesis::download(GPUHypothesis g_hypo) {
+    CUDA_CALL(cudaMemcpy(combination, g_hypo.combination, g_hypo.d * g_hypo.d, cudaMemcpyDeviceToHost))
+    CUDA_CALL(cudaMemcpy(coefficients, g_hypo.coefficients, (g_hypo.d + 1)*sizeof(float), cudaMemcpyDeviceToHost))
+    CUDA_CALL(cudaMemcpy(exponents, g_hypo.exponents, g_hypo.d*2*sizeof(float), cudaMemcpyDeviceToHost))
+    CUDA_CALL(cudaMemcpy(&smape, g_hypo.smape, sizeof(float), cudaMemcpyDeviceToHost))
+    CUDA_CALL(cudaMemcpy(&rss, g_hypo.rss, sizeof(float), cudaMemcpyDeviceToHost))
+}
+
+void CPUHypothesis::print() {
+    std::cout << "-----------------------------------------------------------------" << std::endl;
+    std::cout << "Hypothesis (SMAPE = " << smape << ", RSS = " << rss << ")" << std::endl;
+    std::cout << "Coefficients:";
+    for (int i = 0; i < d + 1; i++)
+        std::cout << " " << coefficients[i];
+    std::cout << "\nExponents:";
+    for (int i = 0; i < 2*d; i+=2) {
+        std::cout << " " << "(" << exponents[i] << ", " << exponents[i+1] << ")";
+    }
+    std::cout << "\nCombination:" << std::endl;
+    for (int i = 0; i < d * d; i++) {
+        std::cout << (int) combination[i] << ", ";
+        if (i%d == 1)
+            std::cout << std::endl;
+    }
+    std::cout << "-----------------------------------------------------------------" << std::endl;
 }
