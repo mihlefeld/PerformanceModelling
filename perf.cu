@@ -471,7 +471,6 @@ void find_hypothesis_templated(
 
         compute_costs<D><<<div_up(num_hypothesis, 512), 512>>>(device_measurements, num_combinations, num_buildingblocks,
                                                                num_hypothesis, cmatrices, rss_costs, smape_costs, i);
-        cudaDeviceSynchronize();
     }
 
     prepare_gels_batched<D><<<div_up(num_hypothesis, block_size), block_size>>>(
