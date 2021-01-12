@@ -1,5 +1,3 @@
-#define DEBUG
-#define DEBUG_IDX 0 * 59319
 #include <limits>
 #include <algorithm>
 #include <cuda_runtime.h>
@@ -59,7 +57,7 @@ __constant__ float building_blocks[] = {
 __constant__ unsigned char combinations[256];
 
 int combinations_2d_end_indices[] {
-    1, 4
+        1, 4
 };
 
 unsigned char combinations_2d[] {
@@ -80,158 +78,158 @@ unsigned char combinations_2d[] {
 // with i + 2 columns start if -1, the combinations using that many columns are not present
 
 int combinations_3d_end_indices[] {
-    1, 11, 23
+        1, 11, 23
 };
 
 unsigned char combinations_3d[] {
-    // 1c: x*y*z
-    1, 1, 1,
-    0, 0, 0,
-    0, 0, 0,
+        // 1c: x*y*z
+        1, 1, 1,
+        0, 0, 0,
+        0, 0, 0,
 
-    // 2c: x*y*z + x
-    1, 1, 1,
-    1, 0, 0,
-    0, 0, 0,
+        // 2c: x*y*z + x
+        1, 1, 1,
+        1, 0, 0,
+        0, 0, 0,
 
-    // 2c: x*y*z + y
-    1, 1, 1,
-    0, 1, 0,
-    0, 0, 0,
+        // 2c: x*y*z + y
+        1, 1, 1,
+        0, 1, 0,
+        0, 0, 0,
 
-    // 2c: x*y*z + z
-    1, 1, 1,
-    0, 0, 1,
-    0, 0, 0,
+        // 2c: x*y*z + z
+        1, 1, 1,
+        0, 0, 1,
+        0, 0, 0,
 
-    // 2c: x*y*z + x*y
-    1, 1, 1,
-    1, 1, 0,
-    0, 0, 0,
+        // 2c: x*y*z + x*y
+        1, 1, 1,
+        1, 1, 0,
+        0, 0, 0,
 
-    // 2c: x*y*z + y*z
-    1, 1, 1,
-    0, 1, 1,
-    0, 0, 0,
+        // 2c: x*y*z + y*z
+        1, 1, 1,
+        0, 1, 1,
+        0, 0, 0,
 
-    // 2c: x*y*z + x*z
-    1, 1, 1,
-    1, 0, 1,
-    0, 0, 0,
+        // 2c: x*y*z + x*z
+        1, 1, 1,
+        1, 0, 1,
+        0, 0, 0,
 
-    // 2c: x*y + z
-    1, 1, 0,
-    0, 0, 1,
-    0, 0, 0,
+        // 2c: x*y + z
+        1, 1, 0,
+        0, 0, 1,
+        0, 0, 0,
 
-    // 2c: x*z + y
-    1, 0, 1,
-    0, 1, 0,
-    0, 0, 0,
+        // 2c: x*z + y
+        1, 0, 1,
+        0, 1, 0,
+        0, 0, 0,
 
-    // 2c: x*z + x
-    0, 1, 1,
-    1, 0, 0,
-    0, 0, 0,
+        // 2c: x*z + x
+        0, 1, 1,
+        1, 0, 0,
+        0, 0, 0,
 
-    // 2c: y*z + x
-    0, 1, 1,
-    1, 0, 0,
-    0, 0, 0,
+        // 2c: y*z + x
+        0, 1, 1,
+        1, 0, 0,
+        0, 0, 0,
 
-    // 3c: x+y+z
-    1, 0, 0,
-    0, 1, 0,
-    0, 0, 1,
+        // 3c: x+y+z
+        1, 0, 0,
+        0, 1, 0,
+        0, 0, 1,
 
-    // 3c: x*y*z + x*y + z
-    1, 1, 1,
-    1, 1, 0,
-    0, 0, 1,
+        // 3c: x*y*z + x*y + z
+        1, 1, 1,
+        1, 1, 0,
+        0, 0, 1,
 
-    // 3c: x*y*z + y*z + x
-    1, 1, 1,
-    0, 1, 1,
-    1, 0, 0,
+        // 3c: x*y*z + y*z + x
+        1, 1, 1,
+        0, 1, 1,
+        1, 0, 0,
 
-    // 3c: x*y*z + x*z + y
-    1, 1, 1,
-    1, 0, 1,
-    0, 1, 0,
+        // 3c: x*y*z + x*z + y
+        1, 1, 1,
+        1, 0, 1,
+        0, 1, 0,
 
-    // 3c: x*y*z + x + y
-    1, 1, 1,
-    1, 0, 0,
-    0, 1, 0,
+        // 3c: x*y*z + x + y
+        1, 1, 1,
+        1, 0, 0,
+        0, 1, 0,
 
-    // 3c: x*y*z + x + z
-    1, 1, 1,
-    1, 0, 0,
-    0, 0, 1,
+        // 3c: x*y*z + x + z
+        1, 1, 1,
+        1, 0, 0,
+        0, 0, 1,
 
-    // 3c: x*y*z + y + z
-    1, 1, 1,
-    0, 1, 0,
-    0, 0, 1,
+        // 3c: x*y*z + y + z
+        1, 1, 1,
+        0, 1, 0,
+        0, 0, 1,
 
-    // 3c: x*y + z + y
-    1, 1, 0,
-    0, 0, 1,
-    0, 1, 0,
+        // 3c: x*y + z + y
+        1, 1, 0,
+        0, 0, 1,
+        0, 1, 0,
 
-    // 3c: x*y + z + x
-    1, 1, 0,
-    0, 0, 1,
-    1, 0, 0,
+        // 3c: x*y + z + x
+        1, 1, 0,
+        0, 0, 1,
+        1, 0, 0,
 
-    // 3c: x*z + y + x
-    1, 0, 1,
-    0, 1, 0,
-    1, 0, 0,
+        // 3c: x*z + y + x
+        1, 0, 1,
+        0, 1, 0,
+        1, 0, 0,
 
-    // 3c: y*z + x + y
-    0, 1, 1,
-    1, 0, 0,
-    0, 1, 0,
+        // 3c: y*z + x + y
+        0, 1, 1,
+        1, 0, 0,
+        0, 1, 0,
 
-    // 3c: y*z + x + z
-    0, 1, 1,
-    1, 0, 0,
-    0, 0, 1,
+        // 3c: y*z + x + z
+        0, 1, 1,
+        1, 0, 0,
+        0, 0, 1,
 };
 
 int combinations_4d_end_indices[] {
-    1, -1, -1, 2
+        1, -1, -1, 2
 };
 
 unsigned char combinations_4d[] {
-    1, 1, 1, 1,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
+        1, 1, 1, 1,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
 
-    1, 0, 0, 0,
-    0, 1, 0, 0,
-    0, 0, 1, 0,
-    0, 0, 0, 1
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
 };
 
 int combinations_5d_end_indices[] {
-    1, -1, -1, -1, 2
+        1, -1, -1, -1, 2
 };
 
 unsigned char combinations_5d[] {
-    1, 1, 1, 1, 1,
-    0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0,
+        1, 1, 1, 1, 1,
+        0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0,
 
-    1, 0, 0, 0, 0,
-    0, 1, 0, 0, 0,
-    0, 0, 1, 0, 0,
-    0, 0, 0, 1, 0,
-    0, 0, 0, 0, 1
+        1, 0, 0, 0, 0,
+        0, 1, 0, 0, 0,
+        0, 0, 1, 0, 0,
+        0, 0, 0, 1, 0,
+        0, 0, 0, 0, 1
 };
 
 __device__ float* get_matrix_element_ptr(GPUMatrix m, int x, int y) {
@@ -241,11 +239,6 @@ __device__ float* get_matrix_element_ptr(GPUMatrix m, int x, int y) {
 __device__ float get_matrix_element(GPUMatrix m, int x, int y) {
     float* pElement = (float*)((char*)m.elements + y * m.pitch) + x;
     return *pElement;
-}
-
-__device__ void set_matrix_element(GPUMatrix m, int x, int y, float v) {
-    float* pElement = (float*)((char*)m.elements + y * m.pitch) + x;
-    *pElement = v;
 }
 
 template<int D>
@@ -272,51 +265,48 @@ __device__ float evaluate_multi(unsigned char *combination, float *coefs, float 
 }
 
 template<int D>
-__device__ void get_data_from_indx(int idx, float *ctps, unsigned char **combination,
-                                   int num_combinations, int num_buildingblocks, int num_hypothesis) {
-    int div_ci = num_hypothesis / num_combinations;
-    int combination_index = idx / div_ci;
-    int mod_idx = idx  % div_ci;
+__device__ void get_data_from_indx(int idx, float *ctps, unsigned char **combination, Counts counts) {
+    int combination_index = idx / counts.hpc;
+    int mod_idx = idx  % counts.hpc;
     *combination = &combinations[combination_index * D * D];
 
-    int r = pow(num_buildingblocks, D-1);
+    int r = counts.hpc;
     for (int i = D - 1; i >= 0; i--) {
+        r/= counts.building_blocks;
         int ctpi = mod_idx / r;
         mod_idx = mod_idx % r;
         for (int j = 0; j < 2; j++) {
             ctps[i * 2 + j] = building_blocks[ctpi * 2 + j];
         }
-        r/= num_buildingblocks;
     }
 }
 
 template<int D>
-__global__ void __launch_bounds__(256) prepare_gels_batched(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
-                                     float *amatrices, float *cmatrices, float **amptrs, float **cmptrs, int swap_indx) {
+__global__ void __launch_bounds__(256) prepare_gels_batched(GPUMatrix measurements, Counts counts, Matrices mats, int swap_indx) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
-    if(idx >= num_hypothesis)
+    if(idx >= counts.hypotheses)
         return;
 
-    float *amatrix = &amatrices[idx * (measurements.height * (D + 1))];
-    float *cmatrix = &cmatrices[idx * measurements.height];
-    amptrs[idx] = amatrix;
-    cmptrs[idx] = cmatrix;
+    float *A = &mats.A[idx * (measurements.height * (D + 1))];
+    float *C = &mats.C[idx * measurements.height];
+    mats.aps[idx] = A;
+    mats.cps[idx] = C;
     // TODO: this really shouldn't be here, I don't even know why it's faster tbh
     __shared__ float sctps[512][2*D];
     float *ctps = sctps[threadIdx.x];
     unsigned char *combination;
 
-    get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
+    get_data_from_indx<D>(idx, ctps, &combination, counts);
 
     for (int i = 0; i < measurements.height; i++) {
         // first element in every row should be 1, since there's always a constant component
-        amatrix[i] = 1;
+        A[i] = 1;
     }
 
     for (int i = 0; i < measurements.height; i++) {
         // TODO: seperate coordinates and values
         int ii = i == swap_indx ? (measurements.height - 1) : (i == measurements.height - 1 ? swap_indx : i);
-        cmatrix[i] = get_matrix_element(measurements, D, ii);
+        C[i] = get_matrix_element(measurements, D, ii);
     }
 
     // TODO: this needs to be adapted to write 128 values at a time to allow for larger measurements matrices
@@ -329,7 +319,7 @@ __global__ void __launch_bounds__(256) prepare_gels_batched(GPUMatrix measuremen
         }
         for (int i = 0; i < measurements.height; i++) {
             // danger danger, amatrix must be column major format
-            amatrix[(j + 1) * measurements.height + i] = column_cache[i];
+            A[(j + 1) * measurements.height + i] = column_cache[i];
         }
     }
 }
@@ -344,16 +334,16 @@ __device__ float rss(float pred, float actual) {
 }
 
 template<int D>
-__global__ void compute_costs(GPUMatrix measurements, int num_combinations, int num_buildingblocks, int num_hypothesis,
-                              float *cmatrices, float *rss_costs, float *smape_costs,
+__global__ void compute_costs(GPUMatrix measurements, Counts counts,
+                              Matrices mats, Costs costs,
                               int validation_index) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
-    if(idx >= num_hypothesis)
+    if(idx >= counts.hypotheses)
         return;
     float ctps[2*D];
-    float *coefs = &cmatrices[idx * measurements.height];
+    float *coefs = &mats.C[idx * measurements.height];
     unsigned char *combination;
-    get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
+    get_data_from_indx<D>(idx, ctps, &combination, counts);
 
     // assume the validation measurement is the last row in the matrix
     int i = validation_index;
@@ -361,19 +351,18 @@ __global__ void compute_costs(GPUMatrix measurements, int num_combinations, int 
     float actual = row_ptr[D];
     float predicted = evaluate_multi<D>(combination, coefs, ctps, row_ptr);
 
-    // TODO: investigate why the computed smape seems to be much lower than the final SMAPE
-    rss_costs[idx] += rss(predicted, actual);
-    smape_costs[idx] += smape(predicted, actual) / (measurements.height - 1);
+    costs.rss[idx] += rss(predicted, actual);
+    costs.smape[idx] += smape(predicted, actual) / (measurements.height - 1);
 }
 
 template<int D>
-__global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations, int num_buildingblocks, int num_hypothesis, GPUMatrix measurements, float* cmatrices, float *smape_costs) {
+__global__ void print_hypothesis(int minimum_rss_cost_idx, Counts counts, GPUMatrix measurements, Matrices mats, Costs costs) {
     int idx = minimum_rss_cost_idx;
 
     float ctps[2*D];
-    float *coefs = &cmatrices[idx * measurements.height];
+    float *coefs = &mats.C[idx * measurements.height];
     unsigned char *combination;
-    get_data_from_indx<D>(idx, ctps, &combination, num_combinations, num_buildingblocks, num_hypothesis);
+    get_data_from_indx<D>(idx, ctps, &combination, counts);
 
     printf("\ncoefs: ");
     for(int i = 0; i < D+1; i++) {
@@ -391,165 +380,99 @@ __global__ void print_hypothesis(int minimum_rss_cost_idx, int num_combinations,
         }
         printf("%d)\n", combination[i*D + D - 1]);
     }
-    printf("Cross Validation SMAPE: %f\n", smape_costs[idx]);
+    printf("Cross Validation SMAPE: %f\n", costs.smape[idx]);
     printf("\n\n");
 }
 
 template<int D>
+void solve(CublasStuff cbstuff, Counts counts, Matrices mats, const int *end_indices, int solve_count) {
+    int start_index = 0;
+    for (int j = 0; j < D; j++) {
+        int end_index = end_indices[j];
+        if (end_index == -1) continue;
+        int combination_count = end_index - start_index;
+        CUBLAS_CALL(cublasSgelsBatched(
+                cbstuff.handle,
+                CUBLAS_OP_N,
+                solve_count, // height of Aarray
+                j + 2, // width of Aarray and height of Carray
+                1, // width of Carray
+                mats.aps + (counts.hpc * start_index), // Aarray pointer
+                cbstuff.lda, // lda >= max(1,m)
+                mats.cps + (counts.hpc * start_index), // Carray pointer
+                cbstuff.lda, // ldc >= max(1,m)
+                &cbstuff.info,
+                nullptr,
+                combination_count * counts.hpc
+        )
+        )
+        start_index = end_index;
+    }
+}
+
+template<int D>
 void find_hypothesis_templated(
-        int num_buildingblocks,
-        int num_combinations,
+        Counts counts,
         unsigned char *combinations_array,
         int *end_indices,
         const CPUMatrix &measurements
     )
 {
-    cublasHandle_t handle;
     int block_size = 128;
+    int grid_size = div_up(counts.hypotheses, block_size);
     int info;
-    int num_hypothesis = pow(num_buildingblocks, D) * num_combinations;
-    int hypothesis_per_combination = num_hypothesis / num_combinations;
-    int *dev_info_array;
-    float *amatrices, *cmatrices, **amptrs, **cmptrs, *rss_costs, *smape_costs;
-    GPUMatrix device_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
+    CublasStuff cbstuff = create_cublas_stuff(measurements.height);
+    Matrices mats = create_matrices(counts, measurements, D);
+    Costs costs = create_costs(counts);
+    GPUMatrix d_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
+    matrix_upload(measurements, d_measurements);
+    CUDA_CALL(cudaMemcpyToSymbol(combinations, combinations_array, counts.combinations * D * D, 0, cudaMemcpyHostToDevice))
 
-    // download pointers for testing
-    CPUMatrix A = matrix_alloc_cpu(measurements.height, D + 1);
-    CPUMatrix X = matrix_alloc_cpu(1, D + 1);
-    CPUMatrix C = matrix_alloc_cpu(1, measurements.height);
-
-    // allocate and upload data
-    matrix_upload(measurements, device_measurements);
-    CUDA_CALL(cudaMemcpyToSymbol(combinations, combinations_array, num_combinations * D * D, 0, cudaMemcpyHostToDevice))
-    CUDA_CALL(cudaMalloc(&rss_costs, num_hypothesis * sizeof(float)));
-    CUDA_CALL(cudaMalloc(&smape_costs, num_hypothesis * sizeof(float)));
-    CUDA_CALL(cudaMalloc(&dev_info_array, num_hypothesis * sizeof(int)));
-    CUDA_CALL(cudaMalloc(&amatrices, num_hypothesis * measurements.height * (D+1) * sizeof(float)))
-    CUDA_CALL(cudaMalloc(&cmatrices, num_hypothesis * measurements.height * sizeof(float)))
-    CUDA_CALL(cudaMalloc(&amptrs, num_hypothesis * sizeof(float*)))
-    CUDA_CALL(cudaMalloc(&cmptrs, num_hypothesis * sizeof(float*)))
-    CUDA_CALL(cudaMemset(rss_costs, 0, num_hypothesis * sizeof(float)))
-    CUDA_CALL(cudaMemset(smape_costs, 0, num_hypothesis * sizeof(float)))
-
-    CUBLAS_CALL(cublasCreate(&handle));
 
     for (int i = 0; i < measurements.height - 1; i++) {
-        prepare_gels_batched<D><<<div_up(num_hypothesis, block_size), block_size>>>(
-                device_measurements,
-                num_combinations,
-                num_buildingblocks,
-                num_hypothesis,
-                amatrices,
-                cmatrices,
-                amptrs,
-                cmptrs,
-                i
-        );
+        prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts, mats, i);
 
-        int start_index = 0;
-        for (int j = 0; j < D; j++) {
-            int end_index = end_indices[j];
-            if (end_index == -1) continue;
-            int combination_count = end_index - start_index;
-            CUBLAS_CALL(cublasSgelsBatched(
-                    handle,
-                    CUBLAS_OP_N,
-                    measurements.height - 1, // height of Aarray
-                    j + 2, // width of Aarray and height of Carray
-                    1, // width of Carray
-                    amptrs + (hypothesis_per_combination * start_index), // Aarray pointer
-                    measurements.height, // lda >= max(1,m)
-                    cmptrs + (hypothesis_per_combination * start_index), // Carray pointer
-                    measurements.height, // ldc >= max(1,m)
-                    &info,
-                    dev_info_array,
-                    combination_count * hypothesis_per_combination
-                )
-            )
-            start_index = end_index;
-        }
+        solve<D>(cbstuff, counts, mats, end_indices, measurements.height - 1);
 
-        compute_costs<D><<<div_up(num_hypothesis, 512), 512>>>(device_measurements, num_combinations, num_buildingblocks,
-                                                               num_hypothesis, cmatrices, rss_costs, smape_costs, i);
+        compute_costs<D><<<grid_size, block_size>>>(d_measurements, counts, mats, costs, i);
     }
 
-    prepare_gels_batched<D><<<div_up(num_hypothesis, block_size), block_size>>>(
-            device_measurements,
-            num_combinations,
-            num_buildingblocks,
-            num_hypothesis,
-            amatrices,
-            cmatrices,
-            amptrs,
-            cmptrs,
-            measurements.width - 1
-    );
+    prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts,mats, measurements.height - 1);
 
-    int start_index = 0;
-    for (int i = 0; i < D; i++) {
-        int end_index = end_indices[i];
-        if (end_index == -1) continue;
-        int combination_count = end_index - start_index;
-        CUBLAS_CALL(cublasSgelsBatched(
-                handle,
-                CUBLAS_OP_N,
-                measurements.height, // height of Aarray
-                i + 2, // width of Aarray and height of Carray
-                1, // width of Carray
-                amptrs + (hypothesis_per_combination * start_index), // Aarray pointer
-                measurements.height, // lda >= max(1,m)
-                cmptrs + (hypothesis_per_combination * start_index), // Carray pointer
-                measurements.height, // ldc >= max(1,m)
-                &info,
-                dev_info_array,
-                combination_count * hypothesis_per_combination
-            )
-        )
-        start_index = end_index;
-    }
+    solve<D>(cbstuff, counts, mats, end_indices, measurements.height);
 
     int minimum_smape_cost;
-    CUBLAS_CALL(cublasIsamin_v2(handle, num_hypothesis, smape_costs, 1, &minimum_smape_cost));
+    CUBLAS_CALL(cublasIsamin_v2(cbstuff.handle, counts.hypotheses, costs.smape, 1, &minimum_smape_cost));
     minimum_smape_cost -= 1;
-    printf("SMAPE cost index: %d\n", minimum_smape_cost);
-    print_hypothesis<D><<<1, 1>>>(minimum_smape_cost, num_combinations, num_buildingblocks, num_hypothesis, device_measurements, cmatrices, smape_costs);
+    print_hypothesis<D><<<1, 1>>>(minimum_smape_cost, counts, d_measurements, mats, costs);
 
     CUDA_CALL(cudaDeviceSynchronize());
 
-    matrix_free_cpu(A);
-    matrix_free_cpu(X);
-    matrix_free_cpu(C);
-    CUDA_CALL(cudaFree(amatrices))
-    CUDA_CALL(cudaFree(cmatrices))
-    CUDA_CALL(cudaFree(amptrs))
-    CUDA_CALL(cudaFree(cmptrs))
-    CUDA_CALL(cudaFree(rss_costs))
-    CUDA_CALL(cudaFree(smape_costs))
-    CUDA_CALL(cudaFree(dev_info_array))
-    matrix_free_gpu(device_measurements);
+    destroy_costs(costs);
+    destroy_matrices(mats);
+    destroy_cublas_stuff(cbstuff);
+    matrix_free_gpu(d_measurements);
 }
 
 void find_hypothesis(const CPUMatrix &measurements) {
     cublasHandle_t handle;
-    int num_combinations;
+    Counts counts;
     int num_buildingblocks = 43;
     int dimensions = measurements.width-1;
     switch(dimensions) {
         case 2:
-            num_combinations = 4;
+            counts = Counts(2, num_buildingblocks, 4);
             find_hypothesis_templated<2>(
-                    num_buildingblocks,
-                    num_combinations,
+                    counts,
                     combinations_2d,
                     combinations_2d_end_indices,
                     measurements
             );
             break;
         case 3:
-            num_combinations = 23;
+            counts = Counts(3, num_buildingblocks, 23);
             find_hypothesis_templated<3>(
-                    num_buildingblocks,
-                    num_combinations,
+                    counts,
                     combinations_3d,
                     combinations_3d_end_indices,
                     measurements
@@ -569,4 +492,50 @@ void find_hypothesis(const CPUMatrix &measurements) {
     }
 
     // TODO return the hypothesis
+}
+
+CublasStuff create_cublas_stuff(int lda) {
+    CublasStuff cbstuff{};
+    cbstuff.lda = lda;
+    CUBLAS_CALL(cublasCreate_v2(&cbstuff.handle));
+    return cbstuff;
+}
+
+Matrices create_matrices(Counts counts, CPUMatrix measurements, int D) {
+    Matrices mats{};
+    CUDA_CALL(cudaMalloc(&mats.A, counts.hypotheses * measurements.height * (D+1) * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&mats.C, counts.hypotheses * measurements.height * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&mats.aps, counts.hypotheses * sizeof(float*)))
+    CUDA_CALL(cudaMalloc(&mats.cps, counts.hypotheses * sizeof(float*)))
+    return mats;
+}
+
+Costs create_costs(Counts counts) {
+    Costs costs{};
+    CUDA_CALL(cudaMalloc(&costs.rss, counts.hypotheses * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&costs.smape, counts.hypotheses * sizeof(float)))
+    CUDA_CALL(cudaMemset(costs.rss, 0, counts.hypotheses * sizeof(float)))
+    CUDA_CALL(cudaMemset(costs.smape, 0, counts.hypotheses * sizeof(float)))
+    return costs;
+}
+
+void destroy_cublas_stuff(CublasStuff cbstuff) {
+    CUBLAS_CALL(cublasDestroy_v2(cbstuff.handle))
+}
+
+void destroy_matrices(Matrices mats) {
+    CUDA_CALL(cudaFree(mats.A))
+    CUDA_CALL(cudaFree(mats.C))
+    CUDA_CALL(cudaFree(mats.aps))
+    CUDA_CALL(cudaFree(mats.cps))
+}
+
+void destroy_costs(Costs costs) {
+    CUDA_CALL(cudaFree(costs.rss))
+    CUDA_CALL(cudaFree(costs.smape))
+}
+
+Counts::Counts(int dim, int building_blocks, int combinations): building_blocks(building_blocks), combinations(combinations){
+    hpc = pow(building_blocks, dim);
+    hypotheses = combinations * hpc;
 }
