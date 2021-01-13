@@ -5,11 +5,15 @@
 
 struct Counts {
     int hypotheses;
+    int batch_size;
+    int batches;
+    int measurements;
+    int dim;
     int combinations;
     int building_blocks;
     int hpc;
     Counts() = default;
-    Counts(int dim, int building_blocks, int combinations);
+    Counts(int dim, int building_blocks, int combinations, int measurements);
 };
 
 struct Matrices {
@@ -60,8 +64,10 @@ void find_hypothesis(const CPUMatrix &measurements);
 template<int D>
 void solve(CublasStuff cbstuff, Counts counts, Matrices mats, const int *end_indices, int solve_count);
 
-CublasStuff create_cublas_stuff(int lda);
-Matrices create_matrices(Counts counts, CPUMatrix measurements, int D);
+size_t calculate_memory_usage(Counts counts);
+
+CublasStuff create_cublas_stuff(Counts counts);
+Matrices create_matrices(Counts counts);
 Costs create_costs(Counts counts);
 GPUHypothesis create_gpu_hypothesis(int d);
 CPUHypothesis create_cpu_hypothesis(int d);

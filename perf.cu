@@ -425,8 +425,8 @@ void find_hypothesis_templated(
     int block_size = 128;
     int grid_size = div_up(counts.hypotheses, block_size);
     int info;
-    CublasStuff cbstuff = create_cublas_stuff(measurements.height);
-    Matrices mats = create_matrices(counts, measurements, D);
+    CublasStuff cbstuff = create_cublas_stuff(counts);
+    Matrices mats = create_matrices(counts);
     Costs costs = create_costs(counts);
     GPUMatrix d_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
     matrix_upload(measurements, d_measurements);
@@ -467,11 +467,11 @@ void find_hypothesis_templated(
 void find_hypothesis(const CPUMatrix &measurements) {
     cublasHandle_t handle;
     Counts counts;
-    int num_buildingblocks = 43;
+    int num_buildingblocks = 39;
     int dimensions = measurements.width-1;
     switch(dimensions) {
         case 2:
-            counts = Counts(2, num_buildingblocks, 4);
+            counts = Counts(2, num_buildingblocks, 4, measurements.height);
             find_hypothesis_templated<2>(
                     counts,
                     combinations_2d,
@@ -480,7 +480,7 @@ void find_hypothesis(const CPUMatrix &measurements) {
             );
             break;
         case 3:
-            counts = Counts(3, num_buildingblocks, 23);
+            counts = Counts(3, num_buildingblocks, 23, measurements.height);
             find_hypothesis_templated<3>(
                     counts,
                     combinations_3d,
@@ -504,17 +504,17 @@ void find_hypothesis(const CPUMatrix &measurements) {
     // TODO return the hypothesis
 }
 
-CublasStuff create_cublas_stuff(int lda) {
+CublasStuff create_cublas_stuff(Counts counts) {
     CublasStuff cbstuff{};
-    cbstuff.lda = lda;
+    cbstuff.lda = counts.measurements;
     CUBLAS_CALL(cublasCreate_v2(&cbstuff.handle));
     return cbstuff;
 }
 
-Matrices create_matrices(Counts counts, CPUMatrix measurements, int D) {
+Matrices create_matrices(Counts counts) {
     Matrices mats{};
-    CUDA_CALL(cudaMalloc(&mats.A, counts.hypotheses * measurements.height * (D+1) * sizeof(float)))
-    CUDA_CALL(cudaMalloc(&mats.C, counts.hypotheses * measurements.height * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&mats.A, counts.hypotheses * counts.measurements * (counts.dim+1) * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&mats.C, counts.hypotheses * counts.measurements * sizeof(float)))
     CUDA_CALL(cudaMalloc(&mats.aps, counts.hypotheses * sizeof(float*)))
     CUDA_CALL(cudaMalloc(&mats.cps, counts.hypotheses * sizeof(float*)))
     return mats;
@@ -579,9 +579,27 @@ void destroy_cpu_hypothseis(CPUHypothesis c_hypo) {
     delete [] c_hypo.exponents;
 }
 
-Counts::Counts(int dim, int building_blocks, int combinations): building_blocks(building_blocks), combinations(combinations){
+size_t calculate_memory_usage(Counts counts) {
+    size_t sof = sizeof(float);
+    size_t size_costs = counts.hypotheses * 2 * sof;
+    size_t size_mat_ptrs = counts.hypotheses * 2 * sizeof(float*);
+    size_t size_a_matrix = counts.hypotheses * counts.measurements * (counts.dim + 1) * sof;
+    size_t size_c_vector = counts.hypotheses * counts.measurements * sof;
+    return size_costs + size_mat_ptrs + size_a_matrix + size_c_vector;
+}
+
+Counts::Counts(int dim, int building_blocks, int combinations, int measurements):
+    dim(dim), building_blocks(building_blocks), combinations(combinations), measurements(measurements) {
     hpc = pow(building_blocks, dim);
     hypotheses = combinations * hpc;
+    cudaDeviceProp device_props{};
+    int device;
+    cudaGetDevice(&device);
+    cudaGetDeviceProperties(&device_props, device);
+    size_t vram_target = device_props.totalGlobalMem * 0.8;
+    size_t vram_cost = calculate_memory_usage(*this);
+    batches = ceil(vram_cost / (float) vram_target);
+    batch_size = ceil(hypotheses / (float) batches);
 }
 
 void CPUHypothesis::download(GPUHypothesis g_hypo) {
