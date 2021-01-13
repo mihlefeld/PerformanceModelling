@@ -259,8 +259,7 @@ __device__ float* get_matrix_element_ptr(GPUMatrix m, int x, int y) {
 }
 
 __device__ float get_matrix_element(GPUMatrix m, int x, int y) {
-    float* pElement = (float*)((char*)m.elements + y * m.pitch) + x;
-    return *pElement;
+    return *get_matrix_element_ptr(m, x, y);
 }
 
 template<int D>
@@ -304,7 +303,7 @@ __device__ void get_data_from_indx(int idx, float *ctps, unsigned char **combina
 
 template<int D>
 __global__ void __launch_bounds__(256)
-prepare_gels_batched(GPUMatrix measurements, Counts counts, Matrices mats, int offset, int swap_indx) {
+prepare_gels_batched(GPUMatrix measurements, Counts counts, Matrices mats, int offset, int tcount = 0) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     if(idx >= counts.batch_size || idx + offset >= counts.hypotheses)
         return;
@@ -320,25 +319,23 @@ prepare_gels_batched(GPUMatrix measurements, Counts counts, Matrices mats, int o
 
     get_data_from_indx<D>(offset + idx, ctps, &combination, counts);
 
-    for (int i = 0; i < measurements.height; i++) {
+    for (int i = 0; i < measurements.height - tcount; i++) {
         // first element in every row should be 1, since there's always a constant component
         A[i] = 1;
     }
 
-    for (int i = 0; i < measurements.height; i++) {
+    for (int i = 0; i < measurements.height - tcount; i++) {
         // TODO: seperate coordinates and values
-        int ii = i == swap_indx ? (measurements.height - 1) : (i == measurements.height - 1 ? swap_indx : i);
-        C[i] = get_matrix_element(measurements, D, ii);
+        C[i] = get_matrix_element(measurements, D, i);
     }
 
     // TODO: alternative kernel for more than 500 measurements
     float column_cache[500];
     for (int j = 0; j < D; j++) {
-        for (int i = 0; i < measurements.height; i++) {
-            int ii = i == swap_indx ? (measurements.height - 1) : (i == measurements.height - 1 ? swap_indx : i);
-            column_cache[i] = evaluate_single<D>(&combination[D*j], 1, ctps, get_matrix_element_ptr(measurements, 0, ii));
+        for (int i = 0; i < measurements.height - tcount; i++) {
+            column_cache[i] = evaluate_single<D>(&combination[D*j], 1, ctps, get_matrix_element_ptr(measurements, 0, i));
         }
-        for (int i = 0; i < measurements.height; i++) {
+        for (int i = 0; i < measurements.height - tcount; i++) {
             A[(j + 1) * measurements.height + i] = column_cache[i];
         }
     }
@@ -356,7 +353,7 @@ __device__ float rss(float pred, float actual) {
 template<int D>
 __global__ void compute_costs(GPUMatrix measurements, Counts counts,
                               Matrices mats, Costs costs,
-                              int offset, int validation_index) {
+                              int offset) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     if(idx >= counts.batch_size || idx + offset >= counts.hypotheses)
         return;
@@ -367,7 +364,7 @@ __global__ void compute_costs(GPUMatrix measurements, Counts counts,
     get_data_from_indx<D>(idx + offset, ctps, &combination, counts);
 
     // assume the validation measurement is the last row in the matrix
-    int i = validation_index;
+    int i = measurements.height - 1;
     float *row_ptr = get_matrix_element_ptr(measurements, 0, i);
     float actual = row_ptr[D];
     float predicted = evaluate_multi<D>(combination, coefs, ctps, row_ptr);
@@ -389,6 +386,15 @@ __global__ void save_hypothesis(GPUHypothesis g_hypo, int idx, int offset, Count
     for (int i = 0; i < D + 1; i++) {
         g_hypo.coefficients[i] = coefs[i];
     }
+}
+
+__global__ void swap_rows(GPUMatrix measurements, int r1, int r2) {
+    int idx = threadIdx.x;
+    float *r1_ptr = get_matrix_element_ptr(measurements, idx, r1);
+    float *r2_ptr = get_matrix_element_ptr(measurements, idx, r2);
+    float tmp = *r1_ptr;
+    *r1_ptr = *r2_ptr;
+    *r2_ptr = tmp;
 }
 
 template<int D>
@@ -447,14 +453,16 @@ void find_hypothesis_templated(
     for (int batch = 0; batch < counts.batches; batch++) {
         int offset = batch * counts.batch_size;
         for (int i = 0; i < measurements.height - 1; i++) {
-            prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts, mats, offset, i);
+            swap_rows<<<1, D+1>>>(d_measurements, i, measurements.height - 1);
+
+            prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts, mats, offset, 1);
 
             solve<D>(cbstuff, counts, mats, offset, end_indices, measurements.height - 1);
 
-            compute_costs<D><<<grid_size, block_size>>>(d_measurements, counts, mats, costs, offset, i);
+            compute_costs<D><<<grid_size, block_size>>>(d_measurements, counts, mats, costs, offset);
         }
 
-        prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts,mats, offset, measurements.height - 1);
+        prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts,mats, offset);
 
         solve<D>(cbstuff, counts, mats, offset, end_indices, measurements.height);
 
