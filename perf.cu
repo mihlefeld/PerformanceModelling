@@ -388,15 +388,6 @@ __global__ void save_hypothesis(GPUHypothesis g_hypo, int idx, int offset, Count
     }
 }
 
-__global__ void swap_rows(GPUMatrix measurements, int r1, int r2) {
-    int idx = threadIdx.x;
-    float *r1_ptr = get_matrix_element_ptr(measurements, idx, r1);
-    float *r2_ptr = get_matrix_element_ptr(measurements, idx, r2);
-    float tmp = *r1_ptr;
-    *r1_ptr = *r2_ptr;
-    *r2_ptr = tmp;
-}
-
 template<int D>
 void solve(CublasStuff cbstuff, Counts counts, Matrices mats, int offset, const int *end_indices, int solve_count) {
     int start_index = 0;
@@ -425,6 +416,60 @@ void solve(CublasStuff cbstuff, Counts counts, Matrices mats, int offset, const 
     }
 }
 
+__global__ void swap_rows(GPUMatrix measurements, int r1, int r2) {
+    int idx = threadIdx.x;
+    float *r1_ptr = get_matrix_element_ptr(measurements, idx, r1);
+    float *r2_ptr = get_matrix_element_ptr(measurements, idx, r2);
+    float tmp = *r1_ptr;
+    *r1_ptr = *r2_ptr;
+    *r2_ptr = tmp;
+}
+
+__global__ void segment_training_data(GPUMatrix src_measurements, GPUMatrix dst_measurements, int start, int end, int size) {
+    int idx = threadIdx.x;
+    int h = src_measurements.height;
+    for (int i = 0; i < start; i++) {
+        *get_matrix_element_ptr(dst_measurements, idx, i) = get_matrix_element(src_measurements, idx, i);
+    }
+    for (int i = start; i < end; i++) {
+        float *loc = get_matrix_element_ptr(dst_measurements, idx, h + (i - start) - size);
+        *loc = get_matrix_element(src_measurements, idx, i);
+    }
+    for (int i = end; i < h; i++) {
+        float *loc = get_matrix_element_ptr(dst_measurements, idx, i - size);
+        *loc = get_matrix_element(src_measurements, idx, i);
+    }
+}
+
+template<int D>
+__global__ void compute_fold_costs(GPUMatrix measurements, Counts counts,
+                                   Matrices mats, Costs costs,
+                                   int vs_size, int k_folds, int offset) {
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+    if(idx >= counts.batch_size || idx + offset >= counts.hypotheses)
+        return;
+
+    float ctps[2*D];
+    float *coefs = &mats.C[idx * measurements.height];
+    unsigned char *combination;
+    get_data_from_indx<D>(idx + offset, ctps, &combination, counts);
+
+    float cur_rss = 0;
+    float cur_smape = 0;
+    for (int i = counts.measurements - vs_size; i < counts.measurements; i++) {
+        float *row_ptr = get_matrix_element_ptr(measurements, 0, i);
+        float actual = row_ptr[D];
+        float predicted = evaluate_multi<D>(combination, coefs, ctps, row_ptr);
+        cur_rss += rss(predicted, actual);
+        cur_smape += smape(predicted, actual);
+    }
+    cur_smape /= k_folds * (counts.measurements / (float) k_folds);
+
+    costs.rss[idx] += cur_rss;
+    costs.smape[idx] += cur_smape;
+
+}
+
 template<int D>
 void find_hypothesis_templated(
         Counts counts,
@@ -433,6 +478,8 @@ void find_hypothesis_templated(
         const CPUMatrix &measurements
     )
 {
+    int k_folds = 5;
+    int fold_size = ceil(counts.measurements / (float) k_folds);
     int block_size = 128;
     int grid_size = div_up(counts.batch_size, block_size);
     int info;
@@ -440,9 +487,11 @@ void find_hypothesis_templated(
     Matrices mats = create_matrices(counts);
     Costs costs = create_costs(counts);
     GPUMatrix d_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
+    GPUMatrix tmp_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
     std::vector<GPUHypothesis> d_hypotheses;
     std::vector<CPUHypothesis> c_hypotheses;
     matrix_upload(measurements, d_measurements);
+    matrix_upload(measurements, tmp_measurements);
     CUDA_CALL(cudaMemcpyToSymbol(combinations, combinations_array, counts.combinations * D * D, 0, cudaMemcpyHostToDevice))
 
     for (int batch = 0; batch < counts.batches; batch++) {
@@ -452,17 +501,17 @@ void find_hypothesis_templated(
 
     for (int batch = 0; batch < counts.batches; batch++) {
         int offset = batch * counts.batch_size;
-        for (int i = 0; i < measurements.height - 1; i++) {
-            swap_rows<<<1, D+1>>>(d_measurements, i, measurements.height - 1);
-
-            prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts, mats, offset, 1);
-
-            solve<D>(cbstuff, counts, mats, offset, end_indices, measurements.height - 1);
-
-            compute_costs<D><<<grid_size, block_size>>>(d_measurements, counts, mats, costs, offset);
+        for (int i = 0; i < k_folds; i++) {
+            int vs_start = fold_size * i;
+            int vs_end = min(counts.measurements - 1, (i + 1) * fold_size);
+            int vs_size = vs_end - vs_start;
+            segment_training_data<<<1, D+1>>>(d_measurements, tmp_measurements, vs_start, vs_end, vs_size);
+            prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts, mats, offset, vs_size);
+            solve<D>(cbstuff, counts, mats, offset, end_indices, measurements.height - vs_size);
+            compute_fold_costs<D><<<grid_size, block_size>>>(tmp_measurements, counts, mats, costs, vs_size, k_folds, offset);
         }
 
-        prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts,mats, offset);
+        prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts, mats, offset);
 
         solve<D>(cbstuff, counts, mats, offset, end_indices, measurements.height);
 
@@ -484,6 +533,7 @@ void find_hypothesis_templated(
     destroy_matrices(mats);
     destroy_cublas_stuff(cbstuff);
     matrix_free_gpu(d_measurements);
+    matrix_free_gpu(tmp_measurements);
 }
 
 void find_hypothesis(const CPUMatrix &measurements) {
