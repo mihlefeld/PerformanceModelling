@@ -467,7 +467,7 @@ void find_hypothesis_templated(
     )
 {
     // calculate fold sizes
-    int k_folds = 10;
+    int k_folds = 5;
     int fold_size = counts.measurements / k_folds;
     float tfs = counts.measurements / (float) k_folds;
     int fold_sizes[k_folds];
