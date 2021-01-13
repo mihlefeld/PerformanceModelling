@@ -350,29 +350,6 @@ __device__ float rss(float pred, float actual) {
     return pow(pred - actual, 2);
 }
 
-template<int D>
-__global__ void compute_costs(GPUMatrix measurements, Counts counts,
-                              Matrices mats, Costs costs,
-                              int offset) {
-    int idx = blockDim.x * blockIdx.x + threadIdx.x;
-    if(idx >= counts.batch_size || idx + offset >= counts.hypotheses)
-        return;
-
-    float ctps[2*D];
-    float *coefs = &mats.C[idx * measurements.height];
-    unsigned char *combination;
-    get_data_from_indx<D>(idx + offset, ctps, &combination, counts);
-
-    // assume the validation measurement is the last row in the matrix
-    int i = measurements.height - 1;
-    float *row_ptr = get_matrix_element_ptr(measurements, 0, i);
-    float actual = row_ptr[D];
-    float predicted = evaluate_multi<D>(combination, coefs, ctps, row_ptr);
-
-    costs.rss[idx] += rss(predicted, actual);
-    costs.smape[idx] += smape(predicted, actual) / (measurements.height - 1);
-}
-
 template <int D>
 __global__ void save_hypothesis(GPUHypothesis g_hypo, int idx, int offset, Counts counts, GPUMatrix measurements, Matrices mats, Costs costs) {
     float *coefs = &mats.C[idx * measurements.height];
@@ -416,15 +393,6 @@ void solve(CublasStuff cbstuff, Counts counts, Matrices mats, int offset, const 
     }
 }
 
-__global__ void swap_rows(GPUMatrix measurements, int r1, int r2) {
-    int idx = threadIdx.x;
-    float *r1_ptr = get_matrix_element_ptr(measurements, idx, r1);
-    float *r2_ptr = get_matrix_element_ptr(measurements, idx, r2);
-    float tmp = *r1_ptr;
-    *r1_ptr = *r2_ptr;
-    *r2_ptr = tmp;
-}
-
 __global__ void segment_training_data(GPUMatrix src_measurements, GPUMatrix dst_measurements, int start, int end, int size) {
     int idx = threadIdx.x;
     int h = src_measurements.height;
@@ -442,9 +410,7 @@ __global__ void segment_training_data(GPUMatrix src_measurements, GPUMatrix dst_
 }
 
 template<int D>
-__global__ void compute_fold_costs(GPUMatrix measurements, Counts counts,
-                                   Matrices mats, Costs costs,
-                                   int vs_size, int k_folds, int offset) {
+__global__ void compute_fold_costs(GPUMatrix measurements, Counts counts, Matrices mats, Costs costs, int vs_size, int offset) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     if(idx >= counts.batch_size || idx + offset >= counts.hypotheses)
         return;
@@ -463,11 +429,33 @@ __global__ void compute_fold_costs(GPUMatrix measurements, Counts counts,
         cur_rss += rss(predicted, actual);
         cur_smape += smape(predicted, actual);
     }
-    cur_smape /= k_folds * (counts.measurements / (float) k_folds);
 
     costs.rss[idx] += cur_rss;
-    costs.smape[idx] += cur_smape;
+    costs.smape[idx] += cur_smape / counts.measurements;
+}
 
+template<int D>
+__global__ void compute_full_cost(GPUMatrix measurements, Counts counts, Matrices mats, Costs costs, int idx, int offset) {
+    if(idx >= counts.batch_size || idx + offset >= counts.hypotheses)
+        return;
+
+    float ctps[2*D];
+    float *coefs = &mats.C[idx * measurements.height];
+    unsigned char *combination;
+    get_data_from_indx<D>(idx + offset, ctps, &combination, counts);
+
+    float cur_rss = 0;
+    float cur_smape = 0;
+    for (int i = 0; i < counts.measurements; i++) {
+        float *row_ptr = get_matrix_element_ptr(measurements, 0, i);
+        float actual = row_ptr[D];
+        float predicted = evaluate_multi<D>(combination, coefs, ctps, row_ptr);
+        cur_rss += rss(predicted, actual);
+        cur_smape += smape(predicted, actual);
+    }
+
+    costs.rss[idx] = cur_rss;
+    costs.smape[idx] = cur_smape / counts.measurements;
 }
 
 template<int D>
@@ -478,21 +466,34 @@ void find_hypothesis_templated(
         const CPUMatrix &measurements
     )
 {
-    int k_folds = 5;
-    int fold_size = ceil(counts.measurements / (float) k_folds);
+    // calculate fold sizes
+    int k_folds = 10;
+    int fold_size = counts.measurements / k_folds;
+    float tfs = counts.measurements / (float) k_folds;
+    int fold_sizes[k_folds];
+    int total = 0;
+    for (int i = 0; i < k_folds; i++) {
+        float ideal = (i + 1) * tfs;
+        int cfs = total + fold_size < ideal ? fold_size + 1 : fold_size;
+        total += cfs;
+        fold_sizes[i] = cfs;
+    }
+
     int block_size = 128;
     int grid_size = div_up(counts.batch_size, block_size);
     int info;
     CublasStuff cbstuff = create_cublas_stuff(counts);
     Matrices mats = create_matrices(counts);
     Costs costs = create_costs(counts);
-    GPUMatrix d_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
-    GPUMatrix tmp_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
+    CPUMatrix r_measurements = row_randomized_copy(measurements);
+    GPUMatrix d_measurements = matrix_alloc_gpu(r_measurements.width, r_measurements.height);
+    GPUMatrix tmp_measurements = matrix_alloc_gpu(r_measurements.width, r_measurements.height);
     std::vector<GPUHypothesis> d_hypotheses;
     std::vector<CPUHypothesis> c_hypotheses;
-    matrix_upload(measurements, d_measurements);
-    matrix_upload(measurements, tmp_measurements);
+    matrix_upload(r_measurements, d_measurements);
+    matrix_upload(r_measurements, tmp_measurements);
     CUDA_CALL(cudaMemcpyToSymbol(combinations, combinations_array, counts.combinations * D * D, 0, cudaMemcpyHostToDevice))
+
 
     for (int batch = 0; batch < counts.batches; batch++) {
         d_hypotheses.push_back(create_gpu_hypothesis(D));
@@ -501,28 +502,29 @@ void find_hypothesis_templated(
 
     for (int batch = 0; batch < counts.batches; batch++) {
         int offset = batch * counts.batch_size;
+        int vs_start = 0;
         for (int i = 0; i < k_folds; i++) {
-            int vs_start = fold_size * i;
-            int vs_end = min(counts.measurements - 1, (i + 1) * fold_size);
-            int vs_size = vs_end - vs_start;
+            int vs_size = fold_sizes[i];
+            int vs_end = vs_start + vs_size;
             segment_training_data<<<1, D+1>>>(d_measurements, tmp_measurements, vs_start, vs_end, vs_size);
-            prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts, mats, offset, vs_size);
-            solve<D>(cbstuff, counts, mats, offset, end_indices, measurements.height - vs_size);
-            compute_fold_costs<D><<<grid_size, block_size>>>(tmp_measurements, counts, mats, costs, vs_size, k_folds, offset);
+            prepare_gels_batched<D><<<grid_size, block_size>>>(tmp_measurements, counts, mats, offset, vs_size);
+            solve<D>(cbstuff, counts, mats, offset, end_indices, r_measurements.height - vs_size);
+            compute_fold_costs<D><<<grid_size, block_size>>>(tmp_measurements, counts, mats, costs, vs_size, offset);
+            vs_start = vs_end;
         }
 
         prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts, mats, offset);
-
-        solve<D>(cbstuff, counts, mats, offset, end_indices, measurements.height);
+        solve<D>(cbstuff, counts, mats, offset, end_indices, r_measurements.height);
 
         int min_cost_idx;
-        CUBLAS_CALL(cublasIsamin_v2(cbstuff.handle, counts.batch_size, costs.smape, 1, &min_cost_idx));
+        CUBLAS_CALL(cublasIsamin_v2(cbstuff.handle, counts.batch_size, costs.smape, 1, &min_cost_idx))
         min_cost_idx -= 1;
+        compute_full_cost<D><<<1, 1>>>(d_measurements, counts, mats, costs, min_cost_idx, offset);
         save_hypothesis<D><<<1, 1>>>(d_hypotheses[batch], min_cost_idx, offset, counts, d_measurements, mats, costs);
 
     }
 
-    CUDA_CALL(cudaDeviceSynchronize())
+    cudaDeviceSynchronize();
 
     for (int batch = 0; batch < counts.batches; batch++) {
         c_hypotheses[batch].download(d_hypotheses[batch]);
@@ -534,6 +536,7 @@ void find_hypothesis_templated(
     destroy_cublas_stuff(cbstuff);
     matrix_free_gpu(d_measurements);
     matrix_free_gpu(tmp_measurements);
+    matrix_free_cpu(r_measurements);
 }
 
 void find_hypothesis(const CPUMatrix &measurements) {

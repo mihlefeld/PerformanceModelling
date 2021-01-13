@@ -27,3 +27,4 @@ void matrix_download(const GPUMatrix &src, CPUMatrix &dst);
 void matrix_print(const CPUMatrix &m);
 
 CPUMatrix load_from_file(const std::string& filename);
+CPUMatrix row_randomized_copy(const CPUMatrix &m);

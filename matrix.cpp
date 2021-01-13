@@ -1,10 +1,14 @@
 #include <iostream>
 #include <cstdlib>
 #include <fstream>
-
+#include <algorithm>
 #include <cuda_runtime.h>
+#include <random>
+#include <vector>
 
 #include "common.h"
+#include "matrix.h"
+
 
 CPUMatrix matrix_alloc_cpu(int width, int height)
 {
@@ -111,4 +115,20 @@ CPUMatrix load_from_file(const std::string& filename) {
     std::cout << "Measurements successfully loaded." << std::endl;
 
     return measurements;
+}
+
+CPUMatrix row_randomized_copy(const CPUMatrix &m) {
+    std::vector<int> indices;
+    indices.resize(m.height);
+    for (int y = 0; y < m.height; y++) {
+        indices[y] = y;
+    }
+    std::shuffle(indices.begin(), indices.end(), std::mt19937(std::random_device()()));
+    CPUMatrix r = matrix_alloc_cpu(m.width, m.height);
+    for (int y = 0; y < m.height; y++) {
+        for (int x = 0; x < m.width; x++) {
+            r.elements[y * m.width + x] = m.elements[indices[y] * m.width + x];
+        }
+    }
+    return r;
 }
