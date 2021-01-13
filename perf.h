@@ -62,7 +62,7 @@ void find_hypothesis_templated(
 void find_hypothesis(const CPUMatrix &measurements);
 
 template<int D>
-void solve(CublasStuff cbstuff, Counts counts, Matrices mats, const int *end_indices, int solve_count);
+void solve(CublasStuff cbstuff, Counts counts, Matrices mats, int offset, const int *end_indices, int solve_count);
 
 size_t calculate_memory_usage(Counts counts);
 
@@ -77,4 +77,4 @@ void destroy_matrices(Matrices mats);
 void destroy_costs(Costs costs);
 
 void destroy_gpu_hypothesis(GPUHypothesis g_hypo);
-void destroy_cpu_hypothseis(CPUHypothesis c_hypo);
+void destroy_cpu_hypothesis(CPUHypothesis c_hypo);

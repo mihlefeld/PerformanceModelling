@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #include <cstdio>
 #include <iostream>
+#include <vector>
 
 #include "cublas_v2.h"
 #include "perf.h"
@@ -302,9 +303,10 @@ __device__ void get_data_from_indx(int idx, float *ctps, unsigned char **combina
 }
 
 template<int D>
-__global__ void __launch_bounds__(256) prepare_gels_batched(GPUMatrix measurements, Counts counts, Matrices mats, int swap_indx) {
+__global__ void __launch_bounds__(256)
+prepare_gels_batched(GPUMatrix measurements, Counts counts, Matrices mats, int offset, int swap_indx) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
-    if(idx >= counts.hypotheses)
+    if(idx >= counts.batch_size || idx + offset >= counts.hypotheses)
         return;
 
     float *A = &mats.A[idx * (measurements.height * (D + 1))];
@@ -316,7 +318,7 @@ __global__ void __launch_bounds__(256) prepare_gels_batched(GPUMatrix measuremen
     float *ctps = sctps[threadIdx.x];
     unsigned char *combination;
 
-    get_data_from_indx<D>(idx, ctps, &combination, counts);
+    get_data_from_indx<D>(offset + idx, ctps, &combination, counts);
 
     for (int i = 0; i < measurements.height; i++) {
         // first element in every row should be 1, since there's always a constant component
@@ -354,14 +356,15 @@ __device__ float rss(float pred, float actual) {
 template<int D>
 __global__ void compute_costs(GPUMatrix measurements, Counts counts,
                               Matrices mats, Costs costs,
-                              int validation_index) {
+                              int offset, int validation_index) {
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
-    if(idx >= counts.hypotheses)
+    if(idx >= counts.batch_size || idx + offset >= counts.hypotheses)
         return;
+
     float ctps[2*D];
     float *coefs = &mats.C[idx * measurements.height];
     unsigned char *combination;
-    get_data_from_indx<D>(idx, ctps, &combination, counts);
+    get_data_from_indx<D>(idx + offset, ctps, &combination, counts);
 
     // assume the validation measurement is the last row in the matrix
     int i = validation_index;
@@ -374,10 +377,10 @@ __global__ void compute_costs(GPUMatrix measurements, Counts counts,
 }
 
 template <int D>
-__global__ void save_hypothesis(GPUHypothesis g_hypo, int idx, Counts counts, GPUMatrix measurements, Matrices mats, Costs costs) {
+__global__ void save_hypothesis(GPUHypothesis g_hypo, int idx, int offset, Counts counts, GPUMatrix measurements, Matrices mats, Costs costs) {
     float *coefs = &mats.C[idx * measurements.height];
     unsigned char *combination;
-    get_data_from_indx<D>(idx, g_hypo.exponents, &combination, counts);
+    get_data_from_indx<D>(idx + offset, g_hypo.exponents, &combination, counts);
     *g_hypo.smape = costs.smape[idx];
     *g_hypo.rss = costs.rss[idx];
     for (int i = 0; i < D*D; i++) {
@@ -389,25 +392,27 @@ __global__ void save_hypothesis(GPUHypothesis g_hypo, int idx, Counts counts, GP
 }
 
 template<int D>
-void solve(CublasStuff cbstuff, Counts counts, Matrices mats, const int *end_indices, int solve_count) {
+void solve(CublasStuff cbstuff, Counts counts, Matrices mats, int offset, const int *end_indices, int solve_count) {
     int start_index = 0;
     for (int j = 0; j < D; j++) {
-        int end_index = end_indices[j];
-        if (end_index == -1) continue;
-        int combination_count = end_index - start_index;
+        int end_index = end_indices[j] * counts.hpc;
+        int osi = max(0, start_index - offset);
+        int oei = min(counts.batch_size - 1, end_index - offset);
+        int occ = oei - osi;
+        if (occ <= 0) continue;
         CUBLAS_CALL(cublasSgelsBatched(
                 cbstuff.handle,
                 CUBLAS_OP_N,
                 solve_count, // height of Aarray
                 j + 2, // width of Aarray and height of Carray
                 1, // width of Carray
-                mats.aps + (counts.hpc * start_index), // Aarray pointer
+                mats.aps + osi, // Aarray pointer
                 cbstuff.lda, // lda >= max(1,m)
-                mats.cps + (counts.hpc * start_index), // Carray pointer
+                mats.cps + osi, // Carray pointer
                 cbstuff.lda, // ldc >= max(1,m)
                 &cbstuff.info,
                 nullptr,
-                combination_count * counts.hpc
+                occ
         )
         )
         start_index = end_index;
@@ -423,51 +428,60 @@ void find_hypothesis_templated(
     )
 {
     int block_size = 128;
-    int grid_size = div_up(counts.hypotheses, block_size);
+    int grid_size = div_up(counts.batch_size, block_size);
     int info;
     CublasStuff cbstuff = create_cublas_stuff(counts);
     Matrices mats = create_matrices(counts);
     Costs costs = create_costs(counts);
     GPUMatrix d_measurements = matrix_alloc_gpu(measurements.width, measurements.height);
+    std::vector<GPUHypothesis> d_hypotheses;
+    std::vector<CPUHypothesis> c_hypotheses;
     matrix_upload(measurements, d_measurements);
     CUDA_CALL(cudaMemcpyToSymbol(combinations, combinations_array, counts.combinations * D * D, 0, cudaMemcpyHostToDevice))
 
-
-    for (int i = 0; i < measurements.height - 1; i++) {
-        prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts, mats, i);
-
-        solve<D>(cbstuff, counts, mats, end_indices, measurements.height - 1);
-
-        compute_costs<D><<<grid_size, block_size>>>(d_measurements, counts, mats, costs, i);
+    for (int batch = 0; batch < counts.batches; batch++) {
+        d_hypotheses.push_back(create_gpu_hypothesis(D));
+        c_hypotheses.push_back(create_cpu_hypothesis(D));
     }
 
-    prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts,mats, measurements.height - 1);
+    for (int batch = 0; batch < counts.batches; batch++) {
+        int offset = batch * counts.batch_size;
+        for (int i = 0; i < measurements.height - 1; i++) {
+            prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts, mats, offset, i);
 
-    solve<D>(cbstuff, counts, mats, end_indices, measurements.height);
+            solve<D>(cbstuff, counts, mats, offset, end_indices, measurements.height - 1);
 
-    int min_cost_idx;
-    CUBLAS_CALL(cublasIsamin_v2(cbstuff.handle, counts.hypotheses, costs.smape, 1, &min_cost_idx));
-    min_cost_idx -= 1;
-    GPUHypothesis g_hypo = create_gpu_hypothesis(D);
-    CPUHypothesis c_hypo = create_cpu_hypothesis(D);
-    save_hypothesis<D><<<1, 1>>>(g_hypo, min_cost_idx, counts, d_measurements, mats, costs);
-    c_hypo.download(g_hypo);
-    c_hypo.print();
+            compute_costs<D><<<grid_size, block_size>>>(d_measurements, counts, mats, costs, offset, i);
+        }
 
-    CUDA_CALL(cudaDeviceSynchronize());
+        prepare_gels_batched<D><<<grid_size, block_size>>>(d_measurements, counts,mats, offset, measurements.height - 1);
+
+        solve<D>(cbstuff, counts, mats, offset, end_indices, measurements.height);
+
+        int min_cost_idx;
+        CUBLAS_CALL(cublasIsamin_v2(cbstuff.handle, counts.batch_size, costs.smape, 1, &min_cost_idx));
+        min_cost_idx -= 1;
+        save_hypothesis<D><<<1, 1>>>(d_hypotheses[batch], min_cost_idx, offset, counts, d_measurements, mats, costs);
+
+    }
+
+    CUDA_CALL(cudaDeviceSynchronize())
+
+    for (int batch = 0; batch < counts.batches; batch++) {
+        c_hypotheses[batch].download(d_hypotheses[batch]);
+        c_hypotheses[batch].print();
+    }
 
     destroy_costs(costs);
     destroy_matrices(mats);
     destroy_cublas_stuff(cbstuff);
-    destroy_gpu_hypothesis(g_hypo);
-    destroy_cpu_hypothseis(c_hypo);
     matrix_free_gpu(d_measurements);
 }
 
 void find_hypothesis(const CPUMatrix &measurements) {
     cublasHandle_t handle;
     Counts counts;
-    int num_buildingblocks = 39;
+    int num_buildingblocks = 43;
     int dimensions = measurements.width-1;
     switch(dimensions) {
         case 2:
@@ -513,19 +527,19 @@ CublasStuff create_cublas_stuff(Counts counts) {
 
 Matrices create_matrices(Counts counts) {
     Matrices mats{};
-    CUDA_CALL(cudaMalloc(&mats.A, counts.hypotheses * counts.measurements * (counts.dim+1) * sizeof(float)))
-    CUDA_CALL(cudaMalloc(&mats.C, counts.hypotheses * counts.measurements * sizeof(float)))
-    CUDA_CALL(cudaMalloc(&mats.aps, counts.hypotheses * sizeof(float*)))
-    CUDA_CALL(cudaMalloc(&mats.cps, counts.hypotheses * sizeof(float*)))
+    CUDA_CALL(cudaMalloc(&mats.A, counts.batch_size * counts.measurements * (counts.dim+1) * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&mats.C, counts.batch_size * counts.measurements * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&mats.aps, counts.batch_size * sizeof(float*)))
+    CUDA_CALL(cudaMalloc(&mats.cps, counts.batch_size * sizeof(float*)))
     return mats;
 }
 
 Costs create_costs(Counts counts) {
     Costs costs{};
-    CUDA_CALL(cudaMalloc(&costs.rss, counts.hypotheses * sizeof(float)))
-    CUDA_CALL(cudaMalloc(&costs.smape, counts.hypotheses * sizeof(float)))
-    CUDA_CALL(cudaMemset(costs.rss, 0, counts.hypotheses * sizeof(float)))
-    CUDA_CALL(cudaMemset(costs.smape, 0, counts.hypotheses * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&costs.rss, counts.batch_size * sizeof(float)))
+    CUDA_CALL(cudaMalloc(&costs.smape, counts.batch_size * sizeof(float)))
+    CUDA_CALL(cudaMemset(costs.rss, 0, counts.batch_size * sizeof(float)))
+    CUDA_CALL(cudaMemset(costs.smape, 0, counts.batch_size * sizeof(float)))
     return costs;
 }
 
@@ -573,7 +587,7 @@ void destroy_gpu_hypothesis(GPUHypothesis g_hypo) {
     CUDA_CALL(cudaFree(g_hypo.rss))
 }
 
-void destroy_cpu_hypothseis(CPUHypothesis c_hypo) {
+void destroy_cpu_hypothesis(CPUHypothesis c_hypo) {
     delete [] c_hypo.combination;
     delete [] c_hypo.coefficients;
     delete [] c_hypo.exponents;
@@ -596,7 +610,7 @@ Counts::Counts(int dim, int building_blocks, int combinations, int measurements)
     int device;
     cudaGetDevice(&device);
     cudaGetDeviceProperties(&device_props, device);
-    size_t vram_target = device_props.totalGlobalMem * 0.8;
+    size_t vram_target = device_props.totalGlobalMem * 0.9;
     size_t vram_cost = calculate_memory_usage(*this);
     batches = ceil(vram_cost / (float) vram_target);
     batch_size = ceil(hypotheses / (float) batches);
@@ -623,7 +637,7 @@ void CPUHypothesis::print() {
     std::cout << "\nCombination:" << std::endl;
     for (int i = 0; i < d * d; i++) {
         std::cout << (int) combination[i] << ", ";
-        if (i%d == 1)
+        if (i%d == d-1)
             std::cout << std::endl;
     }
     std::cout << "-----------------------------------------------------------------" << std::endl;
