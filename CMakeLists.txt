@@ -34,10 +34,21 @@ find_package(CUDA REQUIRED)
 cuda_add_executable(PerformanceModelling
 		main.cpp perf.cu matrix.cpp tests.cpp)
 
+cuda_add_library(cuMppm SHARED
+		perf.cu matrix.cpp)
+
+set_target_properties(cuMppm PROPERTIES
+    VERSION 1
+    SOVERSION 0)
+
 # Activate (and require) C++11 support
 set_property(TARGET PerformanceModelling PROPERTY CXX_STANDARD 17)
 set_property(TARGET PerformanceModelling PROPERTY CXX_STANDARD_REQUIRED ON)
 
+set_property(TARGET cuMppm PROPERTY CXX_STANDARD 17)
+set_property(TARGET cuMppm PROPERTY CXX_STANDARD_REQUIRED ON)
+
 target_link_libraries(PerformanceModelling -lcublas -lcurand)
+target_link_libraries(cuMppm -lcublas -lcurand)
 
 install(TARGETS PerformanceModelling RUNTIME DESTINATION bin)
