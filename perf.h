@@ -42,24 +42,24 @@ struct GPUHypothesis {
 
 struct CPUHypothesis {
     int d;
-    float *coefficients;
-    float *exponents;
+    float coefficients[5];
+    float exponents[10];
     float smape;
     float rss;
-    unsigned char *combination;
+    unsigned char combination[25];
     void download(GPUHypothesis g_hypo);
     void print();
 };
 
 template<int D>
-void find_hypothesis_templated(
+CPUHypothesis find_hypothesis_templated(
         Counts counts,
         unsigned char *combinations_array,
         int *end_indices,
         const CPUMatrix &measurements
 );
 
-extern "C" void find_hypothesis(const CPUMatrix &measurements);
+extern "C" CPUHypothesis find_hypothesis(const CPUMatrix &measurements);
 
 template<int D>
 void solve(CublasStuff cbstuff, Counts counts, Matrices mats, int offset, const int *end_indices, int solve_count);
@@ -77,4 +77,3 @@ void destroy_matrices(Matrices mats);
 void destroy_costs(Costs costs);
 
 void destroy_gpu_hypothesis(GPUHypothesis g_hypo);
-void destroy_cpu_hypothesis(CPUHypothesis c_hypo);

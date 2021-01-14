@@ -459,7 +459,7 @@ __global__ void compute_full_cost(GPUMatrix measurements, Counts counts, Matrice
 }
 
 template<int D>
-void find_hypothesis_templated(
+CPUHypothesis find_hypothesis_templated(
         Counts counts,
         unsigned char *combinations_array,
         int *end_indices,
@@ -525,9 +525,16 @@ void find_hypothesis_templated(
 
     cudaDeviceSynchronize();
 
+    CPUHypothesis best_hypothesis{};
+    float min_smape = 300;
     for (int batch = 0; batch < counts.batches; batch++) {
-        c_hypotheses[batch].download(d_hypotheses[batch]);
-        c_hypotheses[batch].print();
+        auto &cur = c_hypotheses[batch];
+        cur.download(d_hypotheses[batch]);
+        destroy_gpu_hypothesis(d_hypotheses[batch]);
+        if (cur.smape < min_smape) {
+            best_hypothesis = cur;
+            min_smape = cur.smape;
+        }
     }
 
     destroy_costs(costs);
@@ -536,16 +543,19 @@ void find_hypothesis_templated(
     matrix_free_gpu(d_measurements);
     matrix_free_gpu(tmp_measurements);
     matrix_free_cpu(r_measurements);
+
+    return best_hypothesis;
 }
 
-void find_hypothesis(const CPUMatrix &measurements) {
-    Counts counts;
+CPUHypothesis find_hypothesis(const CPUMatrix &measurements) {
+    CPUHypothesis best_hypothesis{};
+    Counts counts{};
     int num_buildingblocks = 43;
     int dimensions = measurements.width-1;
     switch(dimensions) {
         case 2:
             counts = Counts(2, num_buildingblocks, 4, measurements.height);
-            find_hypothesis_templated<2>(
+            best_hypothesis = find_hypothesis_templated<2>(
                     counts,
                     combinations_2d,
                     combinations_2d_end_indices,
@@ -554,7 +564,7 @@ void find_hypothesis(const CPUMatrix &measurements) {
             break;
         case 3:
             counts = Counts(3, num_buildingblocks, 23, measurements.height);
-            find_hypothesis_templated<3>(
+            best_hypothesis = find_hypothesis_templated<3>(
                     counts,
                     combinations_3d,
                     combinations_3d_end_indices,
@@ -574,7 +584,9 @@ void find_hypothesis(const CPUMatrix &measurements) {
             exit(EXIT_FAILURE);
     }
 
-    // TODO return the hypothesis
+    best_hypothesis.print();
+
+    return best_hypothesis;
 }
 
 CublasStuff create_cublas_stuff(Counts counts) {
@@ -632,9 +644,6 @@ GPUHypothesis create_gpu_hypothesis(int d) {
 CPUHypothesis create_cpu_hypothesis(int d) {
     CPUHypothesis hypo{};
     hypo.d = d;
-    hypo.combination = new unsigned char[d * d];
-    hypo.coefficients = new float[d + 1];
-    hypo.exponents = new float[2 * d];
     return hypo;
 }
 
@@ -644,12 +653,6 @@ void destroy_gpu_hypothesis(GPUHypothesis g_hypo) {
     CUDA_CALL(cudaFree(g_hypo.exponents))
     CUDA_CALL(cudaFree(g_hypo.smape))
     CUDA_CALL(cudaFree(g_hypo.rss))
-}
-
-void destroy_cpu_hypothesis(CPUHypothesis c_hypo) {
-    delete [] c_hypo.combination;
-    delete [] c_hypo.coefficients;
-    delete [] c_hypo.exponents;
 }
 
 size_t calculate_memory_usage(Counts counts) {
