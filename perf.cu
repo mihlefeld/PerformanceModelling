@@ -481,7 +481,6 @@ void find_hypothesis_templated(
 
     int block_size = 128;
     int grid_size = div_up(counts.batch_size, block_size);
-    int info;
     CublasStuff cbstuff = create_cublas_stuff(counts);
     Matrices mats = create_matrices(counts);
     Costs costs = create_costs(counts);
@@ -540,7 +539,6 @@ void find_hypothesis_templated(
 }
 
 void find_hypothesis(const CPUMatrix &measurements) {
-    cublasHandle_t handle;
     Counts counts;
     int num_buildingblocks = 43;
     int dimensions = measurements.width-1;
