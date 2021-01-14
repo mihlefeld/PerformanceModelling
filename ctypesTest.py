@@ -146,6 +146,6 @@ c=CPUMatrix(w,h,float_ptr)
 
 print("------\n",c,"\n--------")
 
-print(culib._Z15find_hypothesisRK9CPUMatrix(byref(c)))
+print(culib.find_hypothesis(byref(c)))
 
 

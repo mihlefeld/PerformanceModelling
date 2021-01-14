@@ -59,7 +59,7 @@ void find_hypothesis_templated(
         const CPUMatrix &measurements
 );
 
-void find_hypothesis(const CPUMatrix &measurements);
+extern "C" void find_hypothesis(const CPUMatrix &measurements);
 
 template<int D>
 void solve(CublasStuff cbstuff, Counts counts, Matrices mats, int offset, const int *end_indices, int solve_count);
