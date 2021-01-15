@@ -8,7 +8,6 @@ int main(int argc, char** argv) {
         std::cout << "Usage: " << argv[0] << " <filename> <gpuid>" << std::endl;
         return 0;
     }
-    test();
 
     cudaSetDevice(atoi(argv[2]));
 

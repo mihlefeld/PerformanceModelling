@@ -554,6 +554,7 @@ CPUHypothesis find_hypothesis(const CPUMatrix &measurements) {
     int dimensions = measurements.width-1;
     switch(dimensions) {
         case 2:
+            std::cout << "Calling 2 dimensional solver" << std::endl;
             counts = Counts(2, num_buildingblocks, 4, measurements.height);
             best_hypothesis = find_hypothesis_templated<2>(
                     counts,
@@ -563,6 +564,7 @@ CPUHypothesis find_hypothesis(const CPUMatrix &measurements) {
             );
             break;
         case 3:
+            std::cout << "Calling 3 dimensional solver" << std::endl;
             counts = Counts(3, num_buildingblocks, 23, measurements.height);
             best_hypothesis = find_hypothesis_templated<3>(
                     counts,
@@ -573,12 +575,24 @@ CPUHypothesis find_hypothesis(const CPUMatrix &measurements) {
 
             break;
         case 4:
-
+            std::cout << "Calling 4 dimensional solver" << std::endl;
+            counts = Counts(4, num_buildingblocks, 2, measurements.height);
+            best_hypothesis = find_hypothesis_templated<4>(
+                    counts,
+                    combinations_4d,
+                    combinations_4d_end_indices,
+                    measurements
+            );
             break;
         case 5:
-
+            counts = Counts(5, num_buildingblocks, 2, measurements.height);
+            best_hypothesis = find_hypothesis_templated<5>(
+                    counts,
+                    combinations_5d,
+                    combinations_5d_end_indices,
+                    measurements
+            );
             break;
-
         default:
             std::cerr << "Finding hypothesis with dimensions " << dimensions << " is not supported!" << std::endl;
             exit(EXIT_FAILURE);
@@ -657,11 +671,18 @@ void destroy_gpu_hypothesis(GPUHypothesis g_hypo) {
 
 size_t calculate_memory_usage(Counts counts) {
     size_t sof = sizeof(float);
-    size_t size_costs = counts.hypotheses * 2 * sof;
-    size_t size_mat_ptrs = counts.hypotheses * 2 * sizeof(float*);
-    size_t size_a_matrix = counts.hypotheses * counts.measurements * (counts.dim + 1) * sof;
-    size_t size_c_vector = counts.hypotheses * counts.measurements * sof;
-    return size_costs + size_mat_ptrs + size_a_matrix + size_c_vector;
+    size_t hypotheses = counts.hypotheses;
+    size_t dim = counts.dim;
+    size_t measurements = counts.measurements;
+    size_t size_costs = hypotheses * 2 * sof;
+    size_t size_mat_ptrs = hypotheses * 2 * sizeof(float*);
+    size_t size_a_matrix = hypotheses * measurements * (dim + 1) * sof;
+    size_t size_c_vector = hypotheses * measurements * sof;
+    size_t result = size_a_matrix;
+    result += size_c_vector;
+    result += size_mat_ptrs;
+    result += size_costs;
+    return result;
 }
 
 Counts::Counts(int dim, int building_blocks, int combinations, int measurements):
@@ -672,7 +693,7 @@ Counts::Counts(int dim, int building_blocks, int combinations, int measurements)
     int device;
     cudaGetDevice(&device);
     cudaGetDeviceProperties(&device_props, device);
-    size_t vram_target = device_props.totalGlobalMem * 0.9;
+    size_t vram_target = device_props.totalGlobalMem * 0.8;
     size_t vram_cost = calculate_memory_usage(*this);
     batches = ceil(vram_cost / (float) vram_target);
     batch_size = ceil(hypotheses / (float) batches);
