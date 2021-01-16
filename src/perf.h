@@ -13,7 +13,7 @@ struct Counts {
     int building_blocks;
     int hpc;
     Counts() = default;
-    Counts(int dim, int building_blocks, int combinations, int measurements);
+    Counts(int dim, int building_blocks, int combinations, int measurements, float memory_factor);
 };
 
 struct Matrices {
@@ -59,7 +59,7 @@ CPUHypothesis find_hypothesis_templated(
         const CPUMatrix &measurements
 );
 
-extern "C" CPUHypothesis find_hypothesis(const CPUMatrix &measurements);
+extern "C" CPUHypothesis find_hypothesis(const CPUMatrix &measurements, float memory_factor, int gpu_id);
 
 template<int D>
 void solve(CublasStuff cbstuff, Counts counts, Matrices mats, int offset, const int *end_indices, int solve_count);

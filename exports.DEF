@@ -1,0 +1,3 @@
+LIBRARY cuMPPM
+EXPORTS
+    find_hypothesis @1

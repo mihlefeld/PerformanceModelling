@@ -342,12 +342,12 @@ prepare_gels_batched(GPUMatrix measurements, Counts counts, Matrices mats, int o
 }
 
 __device__ float smape(float pred, float actual) {
-    float abssum = abs(pred) + abs(actual);
-    return abssum != 0 ? 200 * (abs(pred - actual) / abssum) : 0;
+    float abssum = fabs(pred) + fabs(actual);
+    return abssum != 0 ? 200 * (fabs(pred - actual) / abssum) : 0;
 }
 
 __device__ float rss(float pred, float actual) {
-    return pow(pred - actual, 2);
+    return (pred - actual) * (pred - actual);
 }
 
 template <int D>
@@ -470,7 +470,7 @@ CPUHypothesis find_hypothesis_templated(
     int k_folds = 5;
     int fold_size = counts.measurements / k_folds;
     float tfs = counts.measurements / (float) k_folds;
-    int fold_sizes[k_folds];
+    std::vector<int> fold_sizes(k_folds);
     int total = 0;
     for (int i = 0; i < k_folds; i++) {
         float ideal = (i + 1) * tfs;
@@ -547,7 +547,8 @@ CPUHypothesis find_hypothesis_templated(
     return best_hypothesis;
 }
 
-CPUHypothesis find_hypothesis(const CPUMatrix &measurements) {
+CPUHypothesis find_hypothesis(const CPUMatrix &measurements, float memory_factor, int gpu_id) {
+    cudaSetDevice(gpu_id);
     CPUHypothesis best_hypothesis{};
     Counts counts{};
     int num_buildingblocks = 43;
@@ -555,7 +556,7 @@ CPUHypothesis find_hypothesis(const CPUMatrix &measurements) {
     switch(dimensions) {
         case 2:
             std::cout << "Calling 2 dimensional solver" << std::endl;
-            counts = Counts(2, num_buildingblocks, 4, measurements.height);
+            counts = Counts(2, num_buildingblocks, 4, measurements.height, memory_factor);
             best_hypothesis = find_hypothesis_templated<2>(
                     counts,
                     combinations_2d,
@@ -565,7 +566,7 @@ CPUHypothesis find_hypothesis(const CPUMatrix &measurements) {
             break;
         case 3:
             std::cout << "Calling 3 dimensional solver" << std::endl;
-            counts = Counts(3, num_buildingblocks, 23, measurements.height);
+            counts = Counts(3, num_buildingblocks, 23, measurements.height, memory_factor);
             best_hypothesis = find_hypothesis_templated<3>(
                     counts,
                     combinations_3d,
@@ -576,7 +577,7 @@ CPUHypothesis find_hypothesis(const CPUMatrix &measurements) {
             break;
         case 4:
             std::cout << "Calling 4 dimensional solver" << std::endl;
-            counts = Counts(4, num_buildingblocks, 2, measurements.height);
+            counts = Counts(4, num_buildingblocks, 2, measurements.height, memory_factor);
             best_hypothesis = find_hypothesis_templated<4>(
                     counts,
                     combinations_4d,
@@ -585,7 +586,7 @@ CPUHypothesis find_hypothesis(const CPUMatrix &measurements) {
             );
             break;
         case 5:
-            counts = Counts(5, num_buildingblocks, 2, measurements.height);
+            counts = Counts(5, num_buildingblocks, 2, measurements.height, memory_factor);
             best_hypothesis = find_hypothesis_templated<5>(
                     counts,
                     combinations_5d,
@@ -597,9 +598,6 @@ CPUHypothesis find_hypothesis(const CPUMatrix &measurements) {
             std::cerr << "Finding hypothesis with dimensions " << dimensions << " is not supported!" << std::endl;
             exit(EXIT_FAILURE);
     }
-
-    best_hypothesis.print();
-
     return best_hypothesis;
 }
 
@@ -685,7 +683,7 @@ size_t calculate_memory_usage(Counts counts) {
     return result;
 }
 
-Counts::Counts(int dim, int building_blocks, int combinations, int measurements):
+Counts::Counts(int dim, int building_blocks, int combinations, int measurements, float memory_factor):
     dim(dim), building_blocks(building_blocks), combinations(combinations), measurements(measurements) {
     hpc = pow(building_blocks, dim);
     hypotheses = combinations * hpc;
@@ -693,7 +691,7 @@ Counts::Counts(int dim, int building_blocks, int combinations, int measurements)
     int device;
     cudaGetDevice(&device);
     cudaGetDeviceProperties(&device_props, device);
-    size_t vram_target = device_props.totalGlobalMem * 0.8;
+    size_t vram_target = device_props.totalGlobalMem * memory_factor;
     size_t vram_cost = calculate_memory_usage(*this);
     batches = ceil(vram_cost / (float) vram_target);
     batch_size = ceil(hypotheses / (float) batches);
